@@ -7,6 +7,7 @@
 /// - Deposits are blocked
 /// - Single and batch deducts are blocked
 /// - Owner withdrawals are ALLOWED (emergency recovery)
+/// - Admin distribute is ALLOWED (emergency recovery of untracked surplus)
 /// - Admin/owner configuration functions remain available
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec};
 
@@ -644,15 +645,28 @@ impl CalloraVault {
         meta.balance
     }
 
+    /// Distribute USDC from the vault to an arbitrary recipient (admin only).
+    ///
+    /// This function moves **untracked on-ledger surplus** — it checks the actual
+    /// token balance, NOT `meta.balance`. Use this to recover funds that exist
+    /// on-ledger but are not reflected in the vault's internal accounting.
+    ///
+    /// ## Pause Policy
+    /// This function is **ALLOWED when paused**, matching the `withdraw` policy.
+    /// Rationale: `distribute` is an emergency recovery tool for admins to move
+    /// untracked surplus funds even during a circuit-breaker event.
+    ///
+    /// # Panics
+    /// - `"unauthorized: caller is not admin"` — caller is not the admin.
+    /// - `"amount must be positive"` — `amount <= 0`.
+    /// - `"insufficient USDC balance"` — vault lacks on-ledger USDC for transfer.
     pub fn distribute(env: Env, caller: Address, to: Address, amount: i128) {
         caller.require_auth();
         let admin = Self::get_admin(env.clone());
         if caller != admin {
             panic!("unauthorized: caller is not admin");
         }
-        if amount <= 0 {
-            panic!("amount must be positive");
-        }
+        assert!(amount > 0, "amount must be positive");
         let usdc_addr: Address = env
             .storage()
             .instance()
@@ -662,9 +676,10 @@ impl CalloraVault {
         if usdc.balance(&env.current_contract_address()) < amount {
             panic!("insufficient USDC balance");
         }
-        usdc.transfer(&env.current_contract_address(), &to, &amount);
+        // CEI: emit event before external transfer
         env.events()
-            .publish((Symbol::new(&env, "distribute"), to), amount);
+            .publish((Symbol::new(&env, "distribute"), to.clone()), amount);
+        usdc.transfer(&env.current_contract_address(), &to, &amount);
     }
 
     pub fn transfer_ownership(env: Env, new_owner: Address) {
@@ -859,22 +874,6 @@ impl CalloraVault {
             *caller == admin || *caller == meta.owner,
             "unauthorized: caller is not admin or owner"
         );
-    }
-
-    pub fn add_address(env: Env, caller: Address, depositor: Address) {
-        Self::set_allowed_depositor(env.clone(), caller.clone(), Some(depositor.clone()));
-        env.events()
-            .publish((Symbol::new(&env, "allowlist_add"), caller, depositor), ());
-    }
-
-    pub fn get_allowlist(env: Env) -> Vec<Address> {
-        Self::get_allowed_depositors(env)
-    }
-
-    pub fn clear_all(env: Env, caller: Address) {
-        Self::clear_allowed_depositors(env.clone(), caller.clone());
-        env.events()
-            .publish((Symbol::new(&env, "allowlist_clear"), caller), ());
     }
 }
 

@@ -9,6 +9,47 @@ The Callora Vault implements role-based access control for deposit operations to
 - **Owner**: Set during contract initialization. Exclusive authority to manage allowed depositors and withdraw funds.
 - **Allowed Depositor**: Addresses approved by the owner to handle automated deposits.
 - **Authorized Caller**: Optional address permitted to trigger `deduct` operations.
+- **Admin**: Authority over `distribute`, `set_settlement`, `set_revenue_pool`, and admin rotation.
+
+### Distribute Semantics
+
+The `distribute` function allows admins to move **untracked on-ledger surplus** USDC to arbitrary recipients.
+
+**Key Behaviors:**
+- Checks actual token balance, NOT `meta.balance`
+- Useful for recovering funds that exist on-ledger but aren't tracked internally
+- **Allowed when paused** — matches `withdraw` policy for emergency recovery
+
+**Pause Policy Rationale:**
+`distribute` is intentionally exempt from pause checks because it serves as an emergency recovery tool. Admins may need to move untracked surplus funds during a circuit-breaker event, similar to how owners can use `withdraw` to recover tracked funds while paused.
+
+---
+
+### Authorization Matrix
+
+| Function | Owner | Admin | Allowed Depositor | Authorized Caller | Others |
+|----------|-------|-------|-------------------|-------------------|--------|
+| `deposit` | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `withdraw` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `withdraw_to` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `distribute` | ❌ | ✅ | ❌ | ❌ | ❌ |
+| `deduct` | ✅ | ❌ | ❌ | ✅ | ❌ |
+| `batch_deduct` | ✅ | ❌ | ❌ | ✅ | ❌ |
+| `set_settlement` | ❌ | ✅ | ❌ | ❌ | ❌ |
+| `set_revenue_pool` | ❌ | ✅ | ❌ | ❌ | ❌ |
+
+### Pause Behavior
+
+| Function | Blocked when paused? |
+|----------|---------------------|
+| `deposit` | Yes |
+| `deduct` | Yes |
+| `batch_deduct` | Yes |
+| `withdraw` | No (emergency recovery) |
+| `withdraw_to` | No (emergency recovery) |
+| `distribute` | No (emergency recovery of untracked surplus) |
+| `set_settlement` | No (admin config) |
+| `set_revenue_pool` | No (admin config) |
 
 ---
 

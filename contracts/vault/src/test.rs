@@ -1700,6 +1700,73 @@ fn distribute_zero_amount_fails() {
     assert!(result.is_err(), "expected error for zero amount");
 }
 
+#[test]
+fn distribute_while_paused_succeeds() {
+    // distribute is ALLOWED when paused (emergency recovery, matches withdraw policy)
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (vault_address, client) = create_vault(&env);
+    let (usdc, usdc_client, usdc_admin) = create_usdc(&env, &admin);
+
+    env.mock_all_auths();
+    fund_vault(&usdc_admin, &vault_address, 1000);
+    client.init(&admin, &usdc, &Some(0), &None, &None, &None, &None);
+
+    client.pause(&admin);
+    assert!(client.is_paused());
+
+    // distribute should succeed while paused
+    client.distribute(&admin, &recipient, &300);
+
+    assert_eq!(usdc_client.balance(&recipient), 300);
+    assert_eq!(usdc_client.balance(&vault_address), 700);
+}
+
+#[test]
+fn distribute_while_unpaused_succeeds() {
+    // happy path: distribute works normally when unpaused
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (vault_address, client) = create_vault(&env);
+    let (usdc, usdc_client, usdc_admin) = create_usdc(&env, &admin);
+
+    env.mock_all_auths();
+    fund_vault(&usdc_admin, &vault_address, 1000);
+    client.init(&admin, &usdc, &Some(0), &None, &None, &None, &None);
+
+    assert!(!client.is_paused());
+
+    client.distribute(&admin, &recipient, &300);
+
+    assert_eq!(usdc_client.balance(&recipient), 300);
+    assert_eq!(usdc_client.balance(&vault_address), 700);
+}
+
+#[test]
+fn distribute_admin_only_enforcement() {
+    // only admin can call distribute, even when unpaused
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let (vault_address, client) = create_vault(&env);
+    let (usdc, _, usdc_admin) = create_usdc(&env, &admin);
+
+    env.mock_all_auths();
+    fund_vault(&usdc_admin, &vault_address, 1000);
+    client.init(&admin, &usdc, &Some(0), &None, &None, &None, &None);
+
+    // non-admin should fail
+    let result = client.try_distribute(&non_admin, &recipient, &300);
+    assert!(result.is_err(), "expected error when non-admin distributes");
+
+    // admin should succeed
+    client.distribute(&admin, &recipient, &300);
+    assert_eq!(client.balance(), 0); // balance unchanged (distribute uses on-ledger balance)
+}
+
 // ---------------------------------------------------------------------------
 // Offering metadata tests
 // ---------------------------------------------------------------------------
