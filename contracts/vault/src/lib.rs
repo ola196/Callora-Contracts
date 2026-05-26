@@ -716,6 +716,70 @@ impl CalloraVault {
             "unauthorized: caller is not admin or owner"
         );
     }
+
+    /// Cancel a pending ownership transfer.
+    ///
+    /// Only the current owner can call this function to remove a pending
+    /// ownership nomination before the nominee accepts it. This provides
+    /// a safety mechanism to abort mistaken nominations.
+    ///
+    /// # Panics
+    /// - Panics if the caller is not the current owner
+    /// - Panics if there is no pending ownership transfer
+    ///
+    /// # Events
+    /// Emits `ownership_cancelled` event with the current owner and the
+    /// cancelled nominee (if any).
+    pub fn cancel_ownership_transfer(env: Env) {
+        let meta = Self::get_meta(env.clone());
+        meta.owner.require_auth();
+        let inst = env.storage().instance();
+        let pending: Option<Address> = inst.get(&StorageKey::PendingOwner);
+        match pending {
+            Some(pending_owner) => {
+                inst.remove(&StorageKey::PendingOwner);
+                env.events().publish(
+                    (Symbol::new(&env, "ownership_cancelled"), meta.owner, pending_owner),
+                    (),
+                );
+            }
+            None => {
+                panic!("no ownership transfer pending");
+            }
+        }
+    }
+
+    /// Cancel a pending admin transfer.
+    ///
+    /// Only the current admin can call this function to remove a pending
+    /// admin nomination before the nominee accepts it. This provides
+    /// a safety mechanism to abort mistaken nominations.
+    ///
+    /// # Panics
+    /// - Panics if the caller is not the current admin
+    /// - Panics if there is no pending admin transfer
+    ///
+    /// # Events
+    /// Emits `admin_cancelled` event with the current admin and the
+    /// cancelled nominee (if any).
+    pub fn cancel_admin_transfer(env: Env) {
+        let admin = Self::get_admin(env.clone());
+        admin.require_auth();
+        let inst = env.storage().instance();
+        let pending: Option<Address> = inst.get(&StorageKey::PendingAdmin);
+        match pending {
+            Some(pending_admin) => {
+                inst.remove(&StorageKey::PendingAdmin);
+                env.events().publish(
+                    (Symbol::new(&env, "admin_cancelled"), admin, pending_admin),
+                    (),
+                );
+            }
+            None => {
+                panic!("no admin transfer pending");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
