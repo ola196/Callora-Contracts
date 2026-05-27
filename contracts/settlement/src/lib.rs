@@ -71,10 +71,22 @@ impl CalloraSettlement {
     ///
     /// # Panics
     /// Panics if the contract is already initialized.
+    /// Panics if admin and vault_address are the same.
+    /// Panics if admin is the contract's own address.
+    /// Panics if vault_address is the contract's own address.
     pub fn init(env: Env, admin: Address, vault_address: Address) {
         let inst = env.storage().instance();
         if inst.has(&Symbol::new(&env, ADMIN_KEY)) {
             panic!("settlement contract already initialized");
+        }
+        if admin == vault_address {
+            panic!("invalid config: admin and vault_address must be distinct");
+        }
+        if admin == env.current_contract_address() {
+            panic!("invalid config: admin cannot be the contract itself");
+        }
+        if vault_address == env.current_contract_address() {
+            panic!("invalid config: vault_address cannot be the contract itself");
         }
         inst.set(&Symbol::new(&env, ADMIN_KEY), &admin);
         inst.set(&Symbol::new(&env, VAULT_KEY), &vault_address);
