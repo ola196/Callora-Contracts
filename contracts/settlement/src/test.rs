@@ -66,6 +66,44 @@ mod settlement_tests {
         assert_eq!(all_balances.len(), 0);
         assert_eq!(client.get_developer_balance(&developer), 0);
     }
+    #[test]
+    #[should_panic(expected = "invalid config: admin and vault_address must be distinct")]
+    fn test_init_admin_equals_vault_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let addr = env.register(CalloraSettlement, ());
+        let client = CalloraSettlementClient::new(&env, &addr);
+
+        // Passing the same address for admin and vault should be rejected.
+        client.init(&admin, &admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid config: admin cannot be the contract itself")]
+    fn test_init_admin_is_contract_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let vault = Address::generate(&env);
+        let addr = env.register(CalloraSettlement, ());
+        let client = CalloraSettlementClient::new(&env, &addr);
+
+        // Passing the contract's own address as admin should be rejected.
+        client.init(&addr, &vault);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid config: vault_address cannot be the contract itself")]
+    fn test_init_vault_is_contract_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let addr = env.register(CalloraSettlement, ());
+        let client = CalloraSettlementClient::new(&env, &addr);
+
+        // Passing the contract's own address as vault_address should be rejected.
+        client.init(&admin, &addr);
+    }
 
     #[test]
     fn test_receive_payment_to_pool() {
