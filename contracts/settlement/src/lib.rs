@@ -44,6 +44,14 @@ pub struct BalanceCreditedEvent {
     pub new_balance: i128,
 }
 
+/// Emitted when the registered vault address is changed via `set_vault()`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultChangedEvent {
+    pub old_vault: Address,
+    pub new_vault: Address,
+}
+
 /// Storage key for the registered vault address.
 const VAULT_KEY: &str = "vault";
 /// Storage key for the admin address.
@@ -376,8 +384,7 @@ impl CalloraSettlement {
     /// old vault, so coordinate carefully during migrations.
     ///
     /// # Events
-    /// This function does not emit events. Monitor vault changes by
-    /// comparing the result of `get_vault()` across blocks.
+    /// Emits `vault_changed` event with the old and new vault addresses.
     ///
     /// # Panics
     /// Panics if caller is not the current admin.
@@ -387,9 +394,17 @@ impl CalloraSettlement {
         if caller != current_admin {
             panic!("unauthorized: caller is not admin");
         }
-        env.storage()
-            .instance()
-            .set(&Symbol::new(&env, VAULT_KEY), &new_vault);
+        let inst = env.storage().instance();
+        let old_vault = Self::get_vault(env.clone());
+        inst.set(&Symbol::new(&env, VAULT_KEY), &new_vault);
+
+        env.events().publish(
+            (Symbol::new(&env, "vault_changed"), caller.clone()),
+            VaultChangedEvent {
+                old_vault: old_vault.clone(),
+                new_vault: new_vault.clone(),
+            },
+        );
     }
 
     /// Internal function to require authorized caller (vault or admin)

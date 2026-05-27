@@ -768,6 +768,25 @@ after the matching `payment_received` event.
 
 ---
 
+### `vault_changed`
+
+Emitted by `set_vault()` when the admin updates the registered vault address.
+
+| Index   | Location | Type    | Description                        |
+|---------|----------|---------|------------------------------------|
+| topic 0 | topics   | Symbol  | `"vault_changed"`                |
+| topic 1 | topics   | Address | `caller` — admin who performed update |
+| data    | data     | (Address, Address) | (old_vault, new_vault)        |
+
+```json
+{
+  "topics": ["vault_changed", "GADMIN..."],
+  "data": ["GOLDVAULT...", "GNEWVAULT..."]
+}
+```
+
+---
+
 ## Indexer quick-reference
 
 | Event                    | Contract        | Trigger                                  |
@@ -800,6 +819,7 @@ after the matching `payment_received` event.
 | `batch_distribute`       | revenue-pool    | each payment in `batch_distribute()`     |
 | `payment_received`       | settlement      | `receive_payment()`                      |
 | `balance_credited`       | settlement      | `receive_payment()` with `to_pool=false` |
+| `vault_changed`          | settlement      | `set_vault()`                            |
 
 ---
 
