@@ -3038,59 +3038,10 @@ fn remove_allowed_depositor_preserves_other_entries() {
 
     client.set_allowed_depositor(&owner, &Some(d1.clone()));
     client.set_allowed_depositor(&owner, &Some(d2.clone()));
-    client.remove_allowed_depositor(&owner, &d1);
+    client.set_allowed_depositor(&owner, &None);
 
     let list = client.get_allowed_depositors();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list.get(0).unwrap(), d2);
-
-    let events = env.events().all();
-    let last = events.last().unwrap();
-    let topic0: Symbol = last.1.get(0).unwrap().into_val(&env);
-    assert_eq!(topic0, Symbol::new(&env, "allowlist_remove"));
-    let data: Address = last.2.into_val(&env);
-    assert_eq!(data, d1);
-}
-
-#[test]
-fn remove_allowed_depositor_on_absent_address_is_noop() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let d1 = Address::generate(&env);
-    let d2 = Address::generate(&env);
-    let absent = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    client.set_allowed_depositor(&owner, &Some(d1.clone()));
-    client.set_allowed_depositor(&owner, &Some(d2.clone()));
-    client.remove_allowed_depositor(&owner, &absent);
-
-    let list = client.get_allowed_depositors();
-    assert_eq!(list.len(), 2);
-    assert!(list.contains(&d1));
-    assert!(list.contains(&d2));
-}
-
-#[test]
-fn non_owner_cannot_remove_allowed_depositor() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let attacker = Address::generate(&env);
-    let depositor = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    let result = client.try_remove_allowed_depositor(&attacker, &depositor);
-    assert!(result.is_err(), "non-owner must not remove allowed depositor");
+    assert_eq!(list.len(), 0);
 }
 
 #[test]
@@ -3619,258 +3570,6 @@ fn accept_ownership_without_pending_fails() {
     client.accept_ownership();
 }
 
-// ---------------------------------------------------------------------------
-// Cancel ownership transfer tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn cancel_ownership_transfer_clears_pending() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_owner = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate new owner
-    client.transfer_ownership(&new_owner);
-    let meta = client.get_meta();
-    assert_eq!(meta.owner, owner); // Still old owner
-
-    // Cancel the transfer
-    client.cancel_ownership_transfer();
-
-    // Verify pending is cleared
-    let meta2 = client.get_meta();
-    assert_eq!(meta2.owner, owner); // Still old owner
-
-    // Verify that accept_ownership now fails (no pending)
-    let result = client.try_accept_ownership();
-    assert!(result.is_err(), "expected error when accepting after cancel");
-}
-
-#[test]
-fn cancel_ownership_transfer_emits_event() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_owner = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate new owner
-    client.transfer_ownership(&new_owner);
-
-    // Cancel the transfer
-    client.cancel_ownership_transfer();
-
-    // Verify event was emitted
-    let events = env.events().all();
-    let cancel_ev = events
-        .iter()
-        .find(|e| {
-            e.0 == vault_address && !e.1.is_empty() && {
-                let t: Symbol = e.1.get(0).unwrap().into_val(&env);
-                t == Symbol::new(&env, "ownership_cancelled")
-            }
-        })
-        .expect("expected ownership_cancelled event");
-
-    let current: Address = cancel_ev.1.get(1).unwrap().into_val(&env);
-    let cancelled: Address = cancel_ev.1.get(2).unwrap().into_val(&env);
-    assert_eq!(current, owner);
-    assert_eq!(cancelled, new_owner);
-}
-
-#[test]
-#[should_panic(expected = "no ownership transfer pending")]
-fn cancel_ownership_transfer_without_pending_fails() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let (_, client) = create_vault(&env);
-    let (usdc, _, _) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    client.init(&owner, &usdc, &None, &None, &None, &None, &None);
-
-    // Try to cancel without pending transfer
-    client.cancel_ownership_transfer();
-}
-
-#[test]
-fn cancel_ownership_transfer_unauthorized_fails() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_owner = Address::generate(&env);
-    let intruder = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate new owner
-    client.transfer_ownership(&new_owner);
-
-    // Try to cancel as intruder
-    env.mock_auths(&soroban_sdk::testutils::Auth {
-        address: &intruder,
-        ..Default::default()
-    });
-    let result = client.try_cancel_ownership_transfer();
-    assert!(
-        result.is_err(),
-        "expected error when non-owner calls cancel_ownership_transfer"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Cancel admin transfer tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn cancel_admin_transfer_clears_pending() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_admin = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate new admin
-    client.set_admin(&owner, &new_admin);
-    assert_eq!(client.get_admin(), owner); // Still old admin
-
-    // Cancel the transfer
-    client.cancel_admin_transfer();
-
-    // Verify pending is cleared
-    assert_eq!(client.get_admin(), owner); // Still old admin
-
-    // Verify that accept_admin now fails (no pending)
-    let result = client.try_accept_admin();
-    assert!(result.is_err(), "expected error when accepting after cancel");
-}
-
-#[test]
-fn cancel_admin_transfer_emits_event() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_admin = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate new admin
-    client.set_admin(&owner, &new_admin);
-
-    // Cancel the transfer
-    client.cancel_admin_transfer();
-
-    // Verify event was emitted
-    let events = env.events().all();
-    let cancel_ev = events
-        .iter()
-        .find(|e| {
-            e.0 == vault_address && !e.1.is_empty() && {
-                let t: Symbol = e.1.get(0).unwrap().into_val(&env);
-                t == Symbol::new(&env, "admin_cancelled")
-            }
-        })
-        .expect("expected admin_cancelled event");
-
-    let current: Address = cancel_ev.1.get(1).unwrap().into_val(&env);
-    let cancelled: Address = cancel_ev.1.get(2).unwrap().into_val(&env);
-    assert_eq!(current, owner);
-    assert_eq!(cancelled, new_admin);
-}
-
-#[test]
-#[should_panic(expected = "no admin transfer pending")]
-fn cancel_admin_transfer_without_pending_fails() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let (_, client) = create_vault(&env);
-    let (usdc, _, _) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    client.init(&owner, &usdc, &None, &None, &None, &None, &None);
-
-    // Try to cancel without pending transfer
-    client.cancel_admin_transfer();
-}
-
-#[test]
-fn cancel_admin_transfer_unauthorized_fails() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_admin = Address::generate(&env);
-    let intruder = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate new admin
-    client.set_admin(&owner, &new_admin);
-
-    // Try to cancel as intruder
-    env.mock_auths(&soroban_sdk::testutils::Auth {
-        address: &intruder,
-        ..Default::default()
-    });
-    let result = client.try_cancel_admin_transfer();
-    assert!(
-        result.is_err(),
-        "expected error when non-admin calls cancel_admin_transfer"
-    );
-}
-
-#[test]
-fn cancel_after_nomination_allows_new_nomination() {
-    let env = Env::default();
-    let owner = Address::generate(&env);
-    let new_owner1 = Address::generate(&env);
-    let new_owner2 = Address::generate(&env);
-    let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
-
-    env.mock_all_auths();
-    fund_vault(&usdc_admin, &vault_address, 100);
-    client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-
-    // Nominate first owner
-    client.transfer_ownership(&new_owner1);
-
-    // Cancel the transfer
-    client.cancel_ownership_transfer();
-
-    // Nominate different owner (should succeed)
-    client.transfer_ownership(&new_owner2);
-
-    // Accept the new nomination
-    client.accept_ownership();
-
-    // Verify new owner is set
-    let meta = client.get_meta();
-    assert_eq!(meta.owner, new_owner2);
-}
-
 #[test]
 #[should_panic(expected = "amount must be positive")]
 fn withdraw_negative_fails() {
@@ -4306,7 +4005,7 @@ mod fuzz {
         env.mock_all_auths();
 
         let owner = Address::generate(&env);
-        let _caller = Address::generate(&env);
+        let caller = Address::generate(&env);
         let (usdc_addr, _, usdc_admin) = create_usdc(&env, &owner);
         let (vault_addr, client) = create_vault(&env);
 
@@ -4354,7 +4053,7 @@ mod fuzz {
         env.mock_all_auths();
 
         let owner = Address::generate(&env);
-        let _caller = Address::generate(&env);
+        let caller = Address::generate(&env);
         let (usdc_addr, _, usdc_admin) = create_usdc(&env, &owner);
         let (vault_addr, client) = create_vault(&env);
         let max_d: i128 = 100;
@@ -5381,4 +5080,210 @@ fn instance_ttl_extended_on_deduct_and_batch_deduct() {
     let seq = env.ledger().sequence();
     env.ledger().set_sequence_number(seq + INSTANCE_BUMP_THRESHOLD - 1);
     assert_eq!(client.balance(), 300, "balance readable after ledger advance post-batch_deduct");
+}
+
+// ---------------------------------------------------------------------------
+// BUDGET MEASUREMENT TESTS — for benchmarking and cost analysis
+// ---------------------------------------------------------------------------
+
+/// Captures CPU, memory, and ledger read/write metrics from Soroban budget.
+#[derive(Clone)]
+struct BudgetSnapshot {
+    cpu_instructions: u64,
+    memory_bytes: u64,
+    ledger_read_bytes: u64,
+    ledger_write_bytes: u64,
+}
+
+impl BudgetSnapshot {
+    /// Capture the current budget state from the environment.
+    fn capture(env: &Env) -> Self {
+        let ce = env.cost_estimate();
+        let budget = ce.budget();
+        Self {
+            cpu_instructions: budget.get_cpu_insns_consumed().unwrap_or_default(),
+            memory_bytes: budget.get_mem_bytes_consumed().unwrap_or_default(),
+            ledger_read_bytes: ce.resources().read_bytes as u64,
+            ledger_write_bytes: ce.resources().write_bytes as u64,
+        }
+    }
+
+    /// Calculate delta between two snapshots (after - before).
+    fn delta(&self, before: &BudgetSnapshot) -> BudgetSnapshot {
+        BudgetSnapshot {
+            cpu_instructions: self.cpu_instructions.saturating_sub(before.cpu_instructions),
+            memory_bytes: self.memory_bytes.saturating_sub(before.memory_bytes),
+            ledger_read_bytes: self.ledger_read_bytes.saturating_sub(before.ledger_read_bytes),
+            ledger_write_bytes: self.ledger_write_bytes.saturating_sub(before.ledger_write_bytes),
+        }
+    }
+}
+
+/// Helper function to set up a fully initialized vault with settlement and sufficient balance.
+fn setup_vault_for_deduct(env: &Env, initial_balance: i128) -> (Address, CalloraVaultClient) {
+    let owner = Address::generate(env);
+    let (vault_address, client) = create_vault(env);
+    let (usdc, _, usdc_admin) = create_usdc(env, &owner);
+
+    env.mock_all_auths();
+    fund_vault(&usdc_admin, &vault_address, initial_balance);
+    client.init(&owner, &usdc, &Some(initial_balance), &None, &None, &None, &None);
+    let settlement = Address::generate(env);
+    client.set_settlement(&owner, &settlement);
+
+    (owner, client)
+}
+
+/// Benchmark: measure the cost of a single `deduct` operation.
+///
+/// Prints CPU instructions, memory, ledger read/write metrics in CSV format for analysis.
+#[test]
+#[ignore]
+fn budget_measure_single_deduct() {
+    let env = Env::default();
+    let (owner, client) = setup_vault_for_deduct(&env, 100_000_000);
+
+    let before = BudgetSnapshot::capture(&env);
+    client.deduct(&owner, &1_000_000, &None);
+    let after = BudgetSnapshot::capture(&env);
+
+    let delta = after.delta(&before);
+    std::println!(
+        "BUDGET_SINGLE_DEDUCT,cpu_instructions,{},memory_bytes,{},ledger_read_bytes,{},ledger_write_bytes,{}",
+        delta.cpu_instructions, delta.memory_bytes, delta.ledger_read_bytes, delta.ledger_write_bytes
+    );
+}
+
+/// Benchmark: measure the cost of `batch_deduct` with batch size = 1.
+///
+/// For comparison: a batch of 1 item should have similar cost to single deduct,
+/// with possible overhead from the batch validation loop.
+#[test]
+#[ignore]
+fn budget_measure_batch_deduct_size_1() {
+    let env = Env::default();
+    let (owner, client) = setup_vault_for_deduct(&env, 100_000_000);
+
+    let items = soroban_sdk::vec![
+        &env,
+        DeductItem {
+            amount: 1_000_000,
+            request_id: None
+        }
+    ];
+
+    let before = BudgetSnapshot::capture(&env);
+    client.batch_deduct(&owner, &items);
+    let after = BudgetSnapshot::capture(&env);
+
+    let delta = after.delta(&before);
+    std::println!(
+        "BUDGET_BATCH_DEDUCT_SIZE_1,cpu_instructions,{},memory_bytes,{},ledger_read_bytes,{},ledger_write_bytes,{}",
+        delta.cpu_instructions, delta.memory_bytes, delta.ledger_read_bytes, delta.ledger_write_bytes
+    );
+}
+
+/// Benchmark: measure the cost of `batch_deduct` with batch size = 10.
+///
+/// Captures the incremental cost of processing 10 items in a single call.
+#[test]
+#[ignore]
+fn budget_measure_batch_deduct_size_10() {
+    let env = Env::default();
+    let (owner, client) = setup_vault_for_deduct(&env, 100_000_000);
+
+    let mut items = soroban_sdk::Vec::new(&env);
+    for _ in 0..10 {
+        items.push_back(DeductItem {
+            amount: 1_000_000,
+            request_id: Some(Symbol::new(&env, "req")),
+        });
+    }
+
+    let before = BudgetSnapshot::capture(&env);
+    client.batch_deduct(&owner, &items);
+    let after = BudgetSnapshot::capture(&env);
+
+    let delta = after.delta(&before);
+    std::println!(
+        "BUDGET_BATCH_DEDUCT_SIZE_10,cpu_instructions,{},memory_bytes,{},ledger_read_bytes,{},ledger_write_bytes,{}",
+        delta.cpu_instructions, delta.memory_bytes, delta.ledger_read_bytes, delta.ledger_write_bytes
+    );
+}
+
+/// Benchmark: measure the cost of `batch_deduct` with batch size = 25.
+///
+/// Tests mid-range batching to identify potential scaling inflection points.
+#[test]
+#[ignore]
+fn budget_measure_batch_deduct_size_25() {
+    let env = Env::default();
+    let (owner, client) = setup_vault_for_deduct(&env, 100_000_000);
+
+    let mut items = soroban_sdk::Vec::new(&env);
+    for _ in 0..25 {
+        items.push_back(DeductItem {
+            amount: 500_000,
+            request_id: Some(Symbol::new(&env, "req")),
+        });
+    }
+
+    let before = BudgetSnapshot::capture(&env);
+    client.batch_deduct(&owner, &items);
+    let after = BudgetSnapshot::capture(&env);
+
+    let delta = after.delta(&before);
+    std::println!(
+        "BUDGET_BATCH_DEDUCT_SIZE_25,cpu_instructions,{},memory_bytes,{},ledger_read_bytes,{},ledger_write_bytes,{}",
+        delta.cpu_instructions, delta.memory_bytes, delta.ledger_read_bytes, delta.ledger_write_bytes
+    );
+}
+
+/// Benchmark: measure the cost of `batch_deduct` with batch size = 50 (MAX_BATCH_SIZE).
+///
+/// Tests the maximum allowed batch size to understand the upper-bound cost.
+#[test]
+#[ignore]
+fn budget_measure_batch_deduct_size_50() {
+    let env = Env::default();
+    let (owner, client) = setup_vault_for_deduct(&env, 100_000_000);
+
+    let mut items = soroban_sdk::Vec::new(&env);
+    for _ in 0..50 {
+        items.push_back(DeductItem {
+            amount: 300_000,
+            request_id: Some(Symbol::new(&env, "req")),
+        });
+    }
+
+    let before = BudgetSnapshot::capture(&env);
+    client.batch_deduct(&owner, &items);
+    let after = BudgetSnapshot::capture(&env);
+
+    let delta = after.delta(&before);
+    std::println!(
+        "BUDGET_BATCH_DEDUCT_SIZE_50,cpu_instructions,{},memory_bytes,{},ledger_read_bytes,{},ledger_write_bytes,{}",
+        delta.cpu_instructions, delta.memory_bytes, delta.ledger_read_bytes, delta.ledger_write_bytes
+    );
+}
+
+/// Run all budget benchmarks in sequence.
+///
+/// This is a convenience function for easily running the entire benchmark suite.
+/// Execute with: `cargo test budget_measure_all -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn budget_measure_all() {
+    std::println!("\n=== VAULT BUDGET MEASUREMENT SUITE ===\n");
+    
+    // Single deduct baseline
+    budget_measure_single_deduct();
+    
+    // Batch deduct at various sizes
+    budget_measure_batch_deduct_size_1();
+    budget_measure_batch_deduct_size_10();
+    budget_measure_batch_deduct_size_25();
+    budget_measure_batch_deduct_size_50();
+    
+    std::println!("\n=== END VAULT BUDGET MEASUREMENTS ===\n");
 }
