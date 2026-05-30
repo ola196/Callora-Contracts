@@ -1541,4 +1541,78 @@ mod settlement_tests {
             assert_eq!(client.get_developer_balance(dev), 1i128);
         }
     }
+
+    /// Property-based test that drives many randomized receive_payment calls
+    /// (mix of to_pool=true / false) and asserts the conservation invariant:
+    /// sum of all credits == pool total + sum of all developer balances.
+    /// Includes overflow-boundary cases near i128::MAX.
+    #[test]
+    fn test_conservation_invariant_randomized() {
+        let (env, addr, admin, vault, _third_party) = setup_contract();
+        let client = CalloraSettlementClient::new(&env, &addr);
+
+        let mut developers = std::vec::Vec::new();
+        for _ in 0..10 {
+            developers.push(Address::generate(&env));
+        }
+
+        let mut total_credited: i128 = 0;
+
+        // Simple deterministic pseudo-random generator
+        let mut seed: u128 = 42;
+        let mut next_rand = || {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            seed
+        };
+
+        // 1. Run 100 randomized payments with small-to-medium amounts
+        for _ in 0..100 {
+            let to_pool = (next_rand() % 2) == 0;
+            let amount = (next_rand() % 1_000_000) as i128 + 1;
+
+            if to_pool {
+                client.receive_payment(&vault, &amount, &true, &None);
+            } else {
+                let dev_idx = (next_rand() % 10) as usize;
+                if let Some(developer) = developers.get(dev_idx) {
+                    client.receive_payment(&vault, &amount, &false, &Some(developer.clone()));
+                }
+            }
+            total_credited += amount;
+        }
+
+        // 2. Drive towards i128::MAX boundary
+        // Calculate remaining room to reach very close to i128::MAX
+        let buffer = 1_000_000_000_i128;
+        let remaining = i128::MAX - total_credited - buffer;
+
+        if remaining > 0 {
+            let half_remaining = remaining / 2;
+
+            // Large credit to pool
+            client.receive_payment(&vault, &half_remaining, &true, &None);
+            total_credited += half_remaining;
+
+            // Large credit to a developer
+            if let Some(developer) = developers.get(0) {
+                client.receive_payment(&vault, &half_remaining, &false, &Some(developer.clone()));
+                total_credited += half_remaining;
+            }
+        }
+
+        // Final Invariant Check
+        let pool = client.get_global_pool();
+        let mut sum_dev_balances: i128 = 0;
+
+        let all_balances = client.get_all_developer_balances(&admin);
+        for record in all_balances.iter() {
+            sum_dev_balances += record.balance;
+        }
+
+        assert_eq!(
+            total_credited,
+            pool.total_balance + sum_dev_balances,
+            "Conservation invariant violated: total credits must equal pool + developer balances"
+        );
+    }
 }
