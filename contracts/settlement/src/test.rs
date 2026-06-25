@@ -4,7 +4,7 @@ mod settlement_tests {
 
     use crate::{CalloraSettlement, CalloraSettlementClient, SettlementError, StorageKey};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
-    use soroban_sdk::{Address, Env, InvokeError};
+    use soroban_sdk::{token, Address, Env, InvokeError};
 
     fn setup_contract() -> (Env, Address, Address, Address, Address) {
         let env = Env::default();
@@ -16,6 +16,17 @@ mod settlement_tests {
         client.init(&admin, &vault);
         let third_party = Address::generate(&env);
         (env, addr, admin, vault, third_party)
+    }
+
+    fn create_usdc<'a>(
+        env: &'a Env,
+        admin: &Address,
+    ) -> (Address, token::Client<'a>, token::StellarAssetClient<'a>) {
+        let contract_address = env.register_stellar_asset_contract_v2(admin.clone());
+        let address = contract_address.address();
+        let client = token::Client::new(env, &address);
+        let admin_client = token::StellarAssetClient::new(env, &address);
+        (address, client, admin_client)
     }
 
     fn is_error<T>(result: Result<T, InvokeError>, expected: SettlementError) -> bool {
