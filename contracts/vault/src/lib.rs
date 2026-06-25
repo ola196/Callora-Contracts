@@ -101,6 +101,10 @@ pub enum VaultError {
     PriceParseError = 28,
     /// Duplicate request ID detected (code 29).
     DuplicateRequestId = 29,
+    /// Withdraw recipient cannot be the vault contract address (code 30).
+    WithdrawToVaultAddress = 30,
+    /// Withdraw recipient cannot be the configured USDC token address (code 31).
+    WithdrawToUsdcTokenAddress = 31,
 }
 
 #[contracttype]
@@ -868,6 +872,19 @@ impl CalloraVault {
         Ok(meta.balance)
     }
 
+    /// Withdraw USDC from the vault to a specific recipient.
+    ///
+    /// Requires owner authorization and rejects recipients that would strand
+    /// tracked funds: the vault contract itself and the configured USDC token
+    /// contract. Settlement and revenue-pool addresses are valid recipients.
+    ///
+    /// # Errors
+    /// - `VaultError::AmountNotPositive` — `amount <= 0`.
+    /// - `VaultError::InsufficientBalance` — tracked vault balance is too low.
+    /// - `VaultError::NotInitialized` — USDC token address is missing.
+    /// - `VaultError::WithdrawToVaultAddress` — recipient is this vault.
+    /// - `VaultError::WithdrawToUsdcTokenAddress` — recipient is the USDC token.
+    /// - `VaultError::Overflow` — checked balance subtraction failed.
     pub fn withdraw_to(env: Env, to: Address, amount: i128) -> Result<i128, VaultError> {
         let mut meta = Self::get_meta(env.clone())?;
         meta.owner.require_auth();
@@ -882,6 +899,12 @@ impl CalloraVault {
             .instance()
             .get(&StorageKey::UsdcToken)
             .ok_or(VaultError::NotInitialized)?;
+        if to == env.current_contract_address() {
+            return Err(VaultError::WithdrawToVaultAddress);
+        }
+        if to == ua {
+            return Err(VaultError::WithdrawToUsdcTokenAddress);
+        }
         token::Client::new(&env, &ua).transfer(&env.current_contract_address(), &to, &amount);
         meta.balance = meta.balance.checked_sub(amount).ok_or(VaultError::Overflow)?;
         env.storage().instance().set(&StorageKey::MetaKey, &meta);

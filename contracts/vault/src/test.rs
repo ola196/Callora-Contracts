@@ -1457,35 +1457,79 @@ fn withdraw_to_insufficient_balance_fails() {
 }
 
 #[test]
-#[should_panic(expected = "cannot withdraw to vault address")]
 fn withdraw_to_vault_address_fails() {
     let env = Env::default();
     let owner = Address::generate(&env);
     let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
+    let (usdc, usdc_client, usdc_admin) = create_usdc(&env, &owner);
 
     env.mock_all_auths();
     fund_vault(&usdc_admin, &vault_address, 1000);
     client.init(&owner, &usdc, &Some(1000), &None, &None, &None, &None);
 
-    // Attempt to withdraw to the vault itself
-    client.withdraw_to(&vault_address, &100);
+    let result = client.try_withdraw_to(&vault_address, &100);
+    assert_eq!(result, Err(Ok(VaultError::WithdrawToVaultAddress)));
+    assert_eq!(client.balance(), 1000);
+    assert_eq!(usdc_client.balance(&vault_address), 1000);
 }
 
 #[test]
-#[should_panic(expected = "cannot withdraw to token address")]
 fn withdraw_to_token_address_fails() {
     let env = Env::default();
     let owner = Address::generate(&env);
     let (vault_address, client) = create_vault(&env);
-    let (usdc, _, usdc_admin) = create_usdc(&env, &owner);
+    let (usdc, usdc_client, usdc_admin) = create_usdc(&env, &owner);
 
     env.mock_all_auths();
     fund_vault(&usdc_admin, &vault_address, 1000);
     client.init(&owner, &usdc, &Some(1000), &None, &None, &None, &None);
 
-    // Attempt to withdraw to the USDC token contract
-    client.withdraw_to(&usdc, &100);
+    let result = client.try_withdraw_to(&usdc, &100);
+    assert_eq!(result, Err(Ok(VaultError::WithdrawToUsdcTokenAddress)));
+    assert_eq!(client.balance(), 1000);
+    assert_eq!(usdc_client.balance(&vault_address), 1000);
+    assert_eq!(usdc_client.balance(&usdc), 0);
+}
+
+#[test]
+fn withdraw_to_settlement_address_succeeds() {
+    let env = Env::default();
+    let owner = Address::generate(&env);
+    let (vault_address, client) = create_vault(&env);
+    let (usdc, usdc_client, usdc_admin) = create_usdc(&env, &owner);
+
+    env.mock_all_auths();
+    fund_vault(&usdc_admin, &vault_address, 1000);
+    client.init(&owner, &usdc, &Some(1000), &None, &None, &None, &None);
+    let settlement = create_settlement(&env, &owner, &vault_address);
+    client.set_settlement(&owner, &settlement);
+
+    assert_eq!(client.withdraw_to(&settlement, &100), 900);
+    assert_eq!(usdc_client.balance(&settlement), 100);
+}
+
+#[test]
+fn withdraw_to_revenue_pool_address_succeeds() {
+    let env = Env::default();
+    let owner = Address::generate(&env);
+    let revenue_pool = Address::generate(&env);
+    let (vault_address, client) = create_vault(&env);
+    let (usdc, usdc_client, usdc_admin) = create_usdc(&env, &owner);
+
+    env.mock_all_auths();
+    fund_vault(&usdc_admin, &vault_address, 1000);
+    client.init(
+        &owner,
+        &usdc,
+        &Some(1000),
+        &None,
+        &None,
+        &Some(revenue_pool.clone()),
+        &None,
+    );
+
+    assert_eq!(client.withdraw_to(&revenue_pool, &100), 900);
+    assert_eq!(usdc_client.balance(&revenue_pool), 100);
 }
 
 #[test]
@@ -3722,7 +3766,6 @@ fn withdraw_negative_fails() {
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
 fn withdraw_to_negative_fails() {
     let env = Env::default();
     let owner = Address::generate(&env);
@@ -3732,7 +3775,9 @@ fn withdraw_to_negative_fails() {
     env.mock_all_auths();
     fund_vault(&usdc_admin, &vault_address, 100);
     client.init(&owner, &usdc, &Some(100), &None, &None, &None, &None);
-    client.withdraw_to(&recipient, &-1);
+
+    let result = client.try_withdraw_to(&recipient, &-1);
+    assert_eq!(result, Err(Ok(VaultError::AmountNotPositive)));
 }
 
 #[test]
