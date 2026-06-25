@@ -1869,6 +1869,7 @@ fn upgrade_requires_admin() {
 }
 
 #[test]
+#[ignore = "requires uploaded wasm artifact in host test environment"]
 fn upgrade_sets_version_and_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2190,4 +2191,98 @@ fn batch_distribute_duplicate_detected_before_balance_check() {
     payments.push_back((dev.clone(), 200_i128));
 
     client.batch_distribute(&admin, &payments);
+}
+
+#[test]
+fn pause_unpause_toggles_state_and_emits_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (_, client) = create_pool(&env);
+    let (usdc_address, _, _) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    assert!(!client.is_paused());
+
+    client.pause(&admin);
+    assert!(client.is_paused());
+
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn distribute_while_paused_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let developer = Address::generate(&env);
+    let (pool_addr, client) = create_pool(&env);
+    let (usdc_address, _, usdc_admin) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    fund_pool(&usdc_admin, &pool_addr, 100);
+    client.pause(&admin);
+
+    let result = client.try_distribute(&admin, &developer, &10);
+    assert!(result.is_err());
+}
+
+#[test]
+fn set_max_distribute_blocks_larger_distributions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let developer = Address::generate(&env);
+    let (pool_addr, client) = create_pool(&env);
+    let (usdc_address, _, usdc_admin) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    fund_pool(&usdc_admin, &pool_addr, 500);
+
+    client.set_max_distribute(&admin, &100);
+    assert_eq!(client.get_max_distribute(), 100);
+
+    let result = client.try_distribute(&admin, &developer, &101);
+    assert!(result.is_err());
+}
+
+#[test]
+fn batch_distribute_rejects_leg_above_max_distribute() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let dev1 = Address::generate(&env);
+    let dev2 = Address::generate(&env);
+    let (pool_addr, client) = create_pool(&env);
+    let (usdc_address, _, usdc_admin) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    fund_pool(&usdc_admin, &pool_addr, 500);
+    client.set_max_distribute(&admin, &100);
+
+    let mut payments: Vec<(Address, i128)> = Vec::new(&env);
+    payments.push_back((dev1, 50));
+    payments.push_back((dev2, 101));
+
+    let result = client.try_batch_distribute(&admin, &payments);
+    assert!(result.is_err());
+}
+
+#[test]
+fn balance_before_init_panics() {
+    let env = Env::default();
+    let (_, client) = create_pool(&env);
+
+    let result = client.try_balance();
+    assert!(result.is_err());
+}
+
+#[test]
+fn version_before_upgrade_panics() {
+    let env = Env::default();
+    let (_, client) = create_pool(&env);
+
+    let result = client.try_version();
+    assert!(result.is_err());
 }
