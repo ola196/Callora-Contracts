@@ -30,6 +30,7 @@ pub const MAX_DEVELOPER_BALANCES_PAGE_SIZE: u32 = 100;
 /// | 10   | InsufficientDeveloperBalance | Developer balance is less than withdrawal amount  |
 /// | 11   | DeveloperBalanceUnderflow    | Developer balance subtraction would overflow      |
 /// | 12   | InsufficientContractBalance  | Settlement contract lacks on-ledger USDC          |
+/// | 13   | GasExhaustionRisk            | Iteration would exceed gas bounds (>100 devs)    |
 #[contracterror]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
@@ -46,6 +47,7 @@ pub enum SettlementError {
     InsufficientDeveloperBalance = 10,
     DeveloperBalanceUnderflow = 11,
     InsufficientContractBalance = 12,
+    GasExhaustionRisk = 13,
 }
 
 /// Persistent storage keys for settlement contract
@@ -545,6 +547,10 @@ impl CalloraSettlement {
         let index: Vec<Address> = inst
             .get(&StorageKey::DeveloperIndex)
             .unwrap_or_else(|| Vec::new(&env));
+
+        if index.len() > 100 {
+            return Err(SettlementError::GasExhaustionRisk);
+        }
 
         let mut result = Vec::new(&env);
         for address in index.iter() {

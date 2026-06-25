@@ -4,7 +4,11 @@ mod settlement_tests {
 
     use crate::{CalloraSettlement, CalloraSettlementClient, SettlementError, StorageKey};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
-    use soroban_sdk::{token, Address, Env, InvokeError};
+    use soroban_sdk::{token, Address, ConversionError, Env, InvokeError};
+    use std::boxed::Box;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::string::String;
+    use std::string::ToString;
 
     fn setup_contract() -> (Env, Address, Address, Address, Address) {
         let env = Env::default();
@@ -18,11 +22,34 @@ mod settlement_tests {
         (env, addr, admin, vault, third_party)
     }
 
-    fn is_error<T>(result: Result<T, InvokeError>, expected: SettlementError) -> bool {
+    fn is_error<E: Into<soroban_sdk::Error> + core::fmt::Debug>(
+        result: Result<Result<impl core::fmt::Debug, ConversionError>, Result<E, InvokeError>>,
+        expected: SettlementError,
+    ) -> bool {
         match result {
-            Err(InvokeError::Contract(code)) => code == expected as u32,
+            Err(Ok(e)) => {
+                let actual: soroban_sdk::Error = e.into();
+                let target: soroban_sdk::Error = expected.into();
+                actual == target
+            }
             _ => false,
         }
+    }
+
+    fn create_usdc<'a>(env: &'a Env, admin: &Address) -> (Address, token::StellarAssetClient<'a>) {
+        let ca = env.register_stellar_asset_contract_v2(admin.clone());
+        let addr = ca.address();
+        (addr.clone(), token::StellarAssetClient::new(env, &addr))
+    }
+
+    fn panic_message(e: Box<dyn std::any::Any + Send>) -> String {
+        if let Some(s) = e.downcast_ref::<String>() {
+            return s.clone();
+        }
+        if let Some(s) = e.downcast_ref::<&str>() {
+            return (*s).to_string();
+        }
+        "unknown panic".to_string()
     }
 
     #[test]
@@ -53,7 +80,10 @@ mod settlement_tests {
         assert_eq!(global_pool.total_balance, 0);
         assert_eq!(global_pool.last_updated, 1_700_000_000);
 
-        let all_balances = client.try_get_all_developer_balances(&admin).unwrap();
+        let all_balances = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all_balances.len(), 0);
         assert_eq!(client.get_developer_balance(&developer), 0);
     }
@@ -187,7 +217,10 @@ mod settlement_tests {
         let client = CalloraSettlementClient::new(&env, &addr);
         client.init(&admin, &vault);
 
-        let all = client.try_get_all_developer_balances(&admin).unwrap();
+        let all = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all.len(), 0);
     }
 
@@ -260,7 +293,7 @@ mod settlement_tests {
         let developer = Address::generate(&env);
         let addr = env.register(CalloraSettlement, ());
         let client = CalloraSettlementClient::new(&env, &addr);
-        let (usdc_address, _, usdc_admin_client) = create_usdc(&env, &admin);
+        let (usdc_address, usdc_admin_client) = create_usdc(&env, &admin);
 
         client.init(&admin, &vault);
         client.set_usdc_token(&admin, &usdc_address);
@@ -289,7 +322,7 @@ mod settlement_tests {
         let developer = Address::generate(&env);
         let addr = env.register(CalloraSettlement, ());
         let client = CalloraSettlementClient::new(&env, &addr);
-        let (usdc_address, _, usdc_admin_client) = create_usdc(&env, &admin);
+        let (usdc_address, usdc_admin_client) = create_usdc(&env, &admin);
 
         client.init(&admin, &vault);
         client.set_usdc_token(&admin, &usdc_address);
@@ -332,7 +365,7 @@ mod settlement_tests {
         let developer = Address::generate(&env);
         let addr = env.register(CalloraSettlement, ());
         let client = CalloraSettlementClient::new(&env, &addr);
-        let (usdc_address, _, usdc_admin_client) = create_usdc(&env, &admin);
+        let (usdc_address, usdc_admin_client) = create_usdc(&env, &admin);
 
         client.init(&admin, &vault);
         client.set_usdc_token(&admin, &usdc_address);
@@ -378,7 +411,10 @@ mod settlement_tests {
         client.receive_payment(&vault, &200i128, &false, &Some(dev2.clone()));
         client.receive_payment(&vault, &150i128, &false, &Some(dev1.clone()));
 
-        let all = client.try_get_all_developer_balances(&admin).unwrap();
+        let all = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all.len(), 2);
         let mut dev1_seen = false;
         let mut dev2_seen = false;
@@ -407,7 +443,10 @@ mod settlement_tests {
         let client = CalloraSettlementClient::new(&env, &addr);
         client.init(&admin, &vault);
 
-        let all = client.try_get_all_developer_balances(&admin).unwrap();
+        let all = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all.len(), 0);
     }
 
@@ -430,6 +469,7 @@ mod settlement_tests {
 
         let page = client
             .try_get_developer_balances_page(&admin, &1u32, &2u32)
+            .unwrap()
             .unwrap();
         assert_eq!(page.len(), 2);
         assert_eq!(page.get(0).unwrap().address, dev2);
@@ -453,6 +493,7 @@ mod settlement_tests {
 
         let page = client
             .try_get_developer_balances_page(&admin, &0u32, &100u32)
+            .unwrap()
             .unwrap();
         assert_eq!(page.len(), 50);
     }
@@ -473,7 +514,10 @@ mod settlement_tests {
         }
 
         let result = client.try_get_all_developer_balances(&admin);
-        assert_eq!(result, Err(crate::SettlementError::GasExhaustionRisk));
+        assert!(
+            matches!(result, Err(Ok(crate::SettlementError::GasExhaustionRisk))),
+            "expected GasExhaustionRisk"
+        );
     }
 
     #[test]
@@ -1251,7 +1295,10 @@ mod settlement_tests {
         assert_eq!(client.get_developer_balance(&developer), 500i128);
 
         // Admin can still view all balances
-        let all_balances = client.try_get_all_developer_balances(&new_admin).unwrap();
+        let all_balances = client
+            .try_get_all_developer_balances(&new_admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all_balances.len(), 1);
         assert_eq!(all_balances.get(0).unwrap().balance, 500i128);
     }
@@ -1474,7 +1521,10 @@ mod settlement_tests {
         let client = CalloraSettlementClient::new(&env, &addr);
 
         // Admin can call
-        client.try_get_all_developer_balances(&admin).unwrap();
+        client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
 
         // Vault cannot call
         let result = client.try_get_all_developer_balances(&vault);
