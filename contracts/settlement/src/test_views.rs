@@ -3,11 +3,15 @@ use soroban_sdk::{testutils::Address as _, Address, Env, InvokeError};
 
 /// Matches when the contract panics with NotInitialized.
 /// Works for both Result-returning and non-Result-returning functions.
-fn is_not_initialized<T, U>(result: Result<Result<T, U>, Result<soroban_sdk::Error, InvokeError>>) -> bool {
+fn is_not_initialized<T, U>(
+    result: Result<Result<T, U>, Result<soroban_sdk::Error, InvokeError>>,
+) -> bool {
     match result {
         // Non-Result function path: error decoded as Error in Ok slot
-        Err(Ok(err)) => err.is_type(soroban_sdk::xdr::ScErrorType::Contract)
-            && err.get_code() == SettlementError::NotInitialized as u32,
+        Err(Ok(err)) => {
+            err.is_type(soroban_sdk::xdr::ScErrorType::Contract)
+                && err.get_code() == SettlementError::NotInitialized as u32
+        }
         // Result-returning function path: InvokeError
         Err(Err(InvokeError::Contract(code))) => code == SettlementError::NotInitialized as u32,
         _ => false,
@@ -15,7 +19,12 @@ fn is_not_initialized<T, U>(result: Result<Result<T, U>, Result<soroban_sdk::Err
 }
 
 /// For get_all_developer_balances which returns Result<Vec, SettlementError>.
-fn is_not_initialized_result(result: Result<Result<soroban_sdk::Vec<DeveloperBalance>, soroban_sdk::ConversionError>, Result<SettlementError, InvokeError>>) -> bool {
+fn is_not_initialized_result(
+    result: Result<
+        Result<soroban_sdk::Vec<DeveloperBalance>, soroban_sdk::ConversionError>,
+        Result<SettlementError, InvokeError>,
+    >,
+) -> bool {
     match result {
         Err(Ok(SettlementError::NotInitialized)) => true,
         Err(Err(InvokeError::Contract(code))) => code == SettlementError::NotInitialized as u32,

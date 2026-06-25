@@ -4,8 +4,8 @@ mod settlement_tests {
 
     use crate::{CalloraSettlement, CalloraSettlementClient, SettlementError, StorageKey};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
-    use std::panic::{catch_unwind, AssertUnwindSafe};
     use soroban_sdk::{token, Address, ConversionError, Env, Error, InvokeError};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     fn setup_contract() -> (Env, Address, Address, Address, Address) {
         let env = Env::default();
@@ -31,18 +31,28 @@ mod settlement_tests {
     }
 
     /// For functions that DON'T return Result (panics only with SettlementError).
-    fn is_error<T>(result: Result<Result<T, ConversionError>, Result<Error, InvokeError>>, expected: SettlementError) -> bool {
+    fn is_error<T>(
+        result: Result<Result<T, ConversionError>, Result<Error, InvokeError>>,
+        expected: SettlementError,
+    ) -> bool {
         match result {
             // Panic path: the host returns the error which gets decoded as Err(Err(InvokeError::Contract(code)))
             Err(Err(InvokeError::Contract(code))) => code == expected as u32,
             // Non-Result function path: the contract error is decoded as Error in the Ok slot
-            Err(Ok(err)) => err.is_type(soroban_sdk::xdr::ScErrorType::Contract) && err.get_code() == expected as u32,
+            Err(Ok(err)) => {
+                err.is_type(soroban_sdk::xdr::ScErrorType::Contract)
+                    && err.get_code() == expected as u32
+            }
             _ => false,
         }
     }
 
+    #[allow(dead_code)]
     /// For functions that return Result<_, SettlementError> (withdraw_developer_balance).
-    fn is_error_result(result: Result<Result<(), ConversionError>, Result<SettlementError, InvokeError>>, expected: SettlementError) -> bool {
+    fn is_error_result(
+        result: Result<Result<(), ConversionError>, Result<SettlementError, InvokeError>>,
+        expected: SettlementError,
+    ) -> bool {
         match result {
             Err(Ok(e)) => e == expected,
             Err(Err(InvokeError::Contract(code))) => code == expected as u32,
@@ -51,7 +61,13 @@ mod settlement_tests {
     }
 
     /// For functions that return Result<Vec, SettlementError> (get_all_developer_balances).
-    fn is_error_vec<T>(result: Result<Result<soroban_sdk::Vec<T>, ConversionError>, Result<SettlementError, InvokeError>>, expected: SettlementError) -> bool {
+    fn is_error_vec<T>(
+        result: Result<
+            Result<soroban_sdk::Vec<T>, ConversionError>,
+            Result<SettlementError, InvokeError>,
+        >,
+        expected: SettlementError,
+    ) -> bool {
         match result {
             Err(Ok(e)) => e == expected,
             Err(Err(InvokeError::Contract(code))) => code == expected as u32,
@@ -59,7 +75,9 @@ mod settlement_tests {
         }
     }
 
-    fn panic_message(msg: std::boxed::Box<dyn std::any::Any + std::marker::Send>) -> std::string::String {
+    fn panic_message(
+        msg: std::boxed::Box<dyn std::any::Any + std::marker::Send>,
+    ) -> std::string::String {
         match msg.downcast_ref::<std::string::String>() {
             Some(s) => s.clone(),
             None => std::string::String::new(),
@@ -94,7 +112,10 @@ mod settlement_tests {
         assert_eq!(global_pool.total_balance, 0);
         assert_eq!(global_pool.last_updated, 1_700_000_000);
 
-        let all_balances = client.try_get_all_developer_balances(&admin).unwrap().unwrap();
+        let all_balances = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all_balances.len(), 0);
         assert_eq!(client.get_developer_balance(&developer), 0);
     }
@@ -228,7 +249,10 @@ mod settlement_tests {
         let client = CalloraSettlementClient::new(&env, &addr);
         client.init(&admin, &vault);
 
-        let all = client.try_get_all_developer_balances(&admin).unwrap().unwrap();
+        let all = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all.len(), 0);
     }
 
@@ -311,8 +335,14 @@ mod settlement_tests {
         let result = client.try_withdraw_developer_balance(&developer, &100i128);
         assert!(result.is_ok());
         assert_eq!(client.get_developer_balance(&developer), 0i128);
-        assert_eq!(token::Client::new(&env, &usdc_address).balance(&addr), 0i128);
-        assert_eq!(token::Client::new(&env, &usdc_address).balance(&developer), 100i128);
+        assert_eq!(
+            token::Client::new(&env, &usdc_address).balance(&addr),
+            0i128
+        );
+        assert_eq!(
+            token::Client::new(&env, &usdc_address).balance(&developer),
+            100i128
+        );
     }
 
     #[test]
@@ -413,7 +443,10 @@ mod settlement_tests {
         client.receive_payment(&vault, &200i128, &false, &Some(dev2.clone()));
         client.receive_payment(&vault, &150i128, &false, &Some(dev1.clone()));
 
-        let all = client.try_get_all_developer_balances(&admin).unwrap().unwrap();
+        let all = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all.len(), 2);
         let mut dev1_seen = false;
         let mut dev2_seen = false;
@@ -442,7 +475,10 @@ mod settlement_tests {
         let client = CalloraSettlementClient::new(&env, &addr);
         client.init(&admin, &vault);
 
-        let all = client.try_get_all_developer_balances(&admin).unwrap().unwrap();
+        let all = client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all.len(), 0);
     }
 
@@ -465,7 +501,8 @@ mod settlement_tests {
 
         let page = client
             .try_get_developer_balances_page(&admin, &1u32, &2u32)
-            .unwrap().unwrap();
+            .unwrap()
+            .unwrap();
         assert_eq!(page.len(), 2);
         assert_eq!(page.get(0).unwrap().address, dev2);
         assert_eq!(page.get(1).unwrap().address, dev3);
@@ -488,7 +525,8 @@ mod settlement_tests {
 
         let page = client
             .try_get_developer_balances_page(&admin, &0u32, &100u32)
-            .unwrap().unwrap();
+            .unwrap()
+            .unwrap();
         assert_eq!(page.len(), 51);
     }
 
@@ -994,9 +1032,10 @@ mod settlement_tests {
         client.init(&admin, &vault);
 
         env.as_contract(&addr, || {
-            env.storage()
-                .persistent()
-                .set(&crate::StorageKey::DeveloperBalance(developer.clone()), &i128::MAX);
+            env.storage().persistent().set(
+                &crate::StorageKey::DeveloperBalance(developer.clone()),
+                &i128::MAX,
+            );
         });
 
         let result = client.try_receive_payment(&vault, &1i128, &false, &Some(developer));
@@ -1047,17 +1086,29 @@ mod settlement_tests {
         }
 
         let cases = [
-            Case { name: "vault address succeeds",  role: CallerRole::Vault,      should_succeed: true  },
-            Case { name: "admin address succeeds",  role: CallerRole::Admin,      should_succeed: true  },
-            Case { name: "third party fails",       role: CallerRole::ThirdParty, should_succeed: false },
+            Case {
+                name: "vault address succeeds",
+                role: CallerRole::Vault,
+                should_succeed: true,
+            },
+            Case {
+                name: "admin address succeeds",
+                role: CallerRole::Admin,
+                should_succeed: true,
+            },
+            Case {
+                name: "third party fails",
+                role: CallerRole::ThirdParty,
+                should_succeed: false,
+            },
         ];
 
         for case in cases {
             let (env, addr, admin, vault, third_party) = setup_contract();
             let client = CalloraSettlementClient::new(&env, &addr);
             let caller = match case.role {
-                CallerRole::Vault      => vault,
-                CallerRole::Admin      => admin,
+                CallerRole::Vault => vault,
+                CallerRole::Admin => admin,
                 CallerRole::ThirdParty => third_party,
             };
 
@@ -1271,7 +1322,10 @@ mod settlement_tests {
         assert_eq!(client.get_developer_balance(&developer), 500i128);
 
         // Admin can still view all balances
-        let all_balances = client.try_get_all_developer_balances(&new_admin).unwrap().unwrap();
+        let all_balances = client
+            .try_get_all_developer_balances(&new_admin)
+            .unwrap()
+            .unwrap();
         assert_eq!(all_balances.len(), 1);
         assert_eq!(all_balances.get(0).unwrap().balance, 500i128);
     }
@@ -1494,7 +1548,10 @@ mod settlement_tests {
         let client = CalloraSettlementClient::new(&env, &addr);
 
         // Admin can call
-        client.try_get_all_developer_balances(&admin).unwrap().unwrap();
+        client
+            .try_get_all_developer_balances(&admin)
+            .unwrap()
+            .unwrap();
 
         // Vault cannot call
         let result = client.try_get_all_developer_balances(&vault);
@@ -1698,7 +1755,7 @@ mod settlement_tests {
             total_credited += half_remaining;
 
             // Large credit to a developer
-            if let Some(developer) = developers.get(0) {
+            if let Some(developer) = developers.first() {
                 client.receive_payment(&vault, &half_remaining, &false, &Some(developer.clone()));
                 total_credited += half_remaining;
             }
