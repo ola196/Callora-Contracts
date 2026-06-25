@@ -1476,8 +1476,8 @@ mod settlement_tests {
         let dev2 = Address::generate(&env);
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev1.clone(), 100i128));
-        items.push_back((dev2.clone(), 200i128));
+        items.push_back((Some(dev1.clone()), false, 100i128));
+        items.push_back((Some(dev2.clone()), false, 200i128));
 
         client.batch_receive_payment(&vault, &items);
 
@@ -1494,7 +1494,7 @@ mod settlement_tests {
         client.receive_payment(&vault, &50i128, &false, &Some(dev.clone()));
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev.clone(), 75i128));
+        items.push_back((Some(dev.clone()), false, 75i128));
         client.batch_receive_payment(&vault, &items);
 
         assert_eq!(client.get_developer_balance(&dev), 125i128);
@@ -1507,7 +1507,7 @@ mod settlement_tests {
         let dev = Address::generate(&env);
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev.clone(), 300i128));
+        items.push_back((Some(dev.clone()), false, 300i128));
         client.batch_receive_payment(&admin, &items);
 
         assert_eq!(client.get_developer_balance(&dev), 300i128);
@@ -1518,7 +1518,7 @@ mod settlement_tests {
         let (env, addr, _admin, vault, _third_party) = setup_contract();
         let client = CalloraSettlementClient::new(&env, &addr);
 
-        let items: soroban_sdk::Vec<(Address, i128)> = soroban_sdk::Vec::new(&env);
+        let items: soroban_sdk::Vec<(Option<Address>, bool, i128)> = soroban_sdk::Vec::new(&env);
         let result = client.try_batch_receive_payment(&vault, &items);
         assert!(result.is_err());
     }
@@ -1532,7 +1532,7 @@ mod settlement_tests {
 
         let mut items = soroban_sdk::Vec::new(&env);
         for _ in 0..=MAX_BATCH_SIZE {
-            items.push_back((dev.clone(), 1i128));
+            items.push_back((Some(dev.clone()), false, 1i128));
         }
         let result = client.try_batch_receive_payment(&vault, &items);
         assert!(result.is_err());
@@ -1545,7 +1545,7 @@ mod settlement_tests {
         let dev = Address::generate(&env);
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev.clone(), 0i128));
+        items.push_back((Some(dev.clone()), false, 0i128));
         let result = client.try_batch_receive_payment(&vault, &items);
         assert!(result.is_err());
     }
@@ -1557,7 +1557,7 @@ mod settlement_tests {
         let dev = Address::generate(&env);
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev.clone(), -1i128));
+        items.push_back((Some(dev.clone()), false, -1i128));
         let result = client.try_batch_receive_payment(&vault, &items);
         assert!(result.is_err());
     }
@@ -1569,7 +1569,7 @@ mod settlement_tests {
         let dev = Address::generate(&env);
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev.clone(), 100i128));
+        items.push_back((Some(dev.clone()), false, 100i128));
         let result = client.try_batch_receive_payment(&third_party, &items);
         assert!(is_error(result, SettlementError::Unauthorized));
     }
@@ -1581,7 +1581,7 @@ mod settlement_tests {
         let dev = Address::generate(&env);
 
         let mut items = soroban_sdk::Vec::new(&env);
-        items.push_back((dev.clone(), 999i128));
+        items.push_back((Some(dev.clone()), false, 999i128));
         client.batch_receive_payment(&vault, &items);
 
         assert_eq!(client.get_developer_balance(&dev), 999i128);
@@ -1598,7 +1598,7 @@ mod settlement_tests {
         for _ in 0..MAX_BATCH_SIZE {
             let dev = Address::generate(&env);
             devs.push(dev.clone());
-            items.push_back((dev, 1i128));
+            items.push_back((Some(dev), false, 1i128));
         }
         client.batch_receive_payment(&vault, &items);
 

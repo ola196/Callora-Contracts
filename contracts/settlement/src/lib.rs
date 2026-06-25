@@ -289,31 +289,24 @@ impl CalloraSettlement {
         }
     }
 
-    /// Atomically credit multiple developer balances in a single call.
+    /// Atomically credit multiple balances in a single call.
     ///
     /// # Arguments
     /// * `caller` - Must be the registered vault address or admin
-    /// * `items` - Vec of `(developer_address, amount)` pairs; 1–[`MAX_BATCH_SIZE`] entries
+    /// * `items` - Vec of `(developer: Option<Address>, to_pool: bool, amount: i128)` pairs; 1–[`MAX_BATCH_SIZE`] entries
     ///
     /// # Access Control
     /// Only the registered vault address or admin can call this function.
     ///
     /// # Validation
     /// All amounts must be `> 0`. Empty and oversized batches are rejected before any state change.
+    /// If `to_pool` is true, `developer` must be `None`.
+    /// If `to_pool` is false, `developer` must be `Some`.
     ///
     /// # Atomicity
     /// All validation runs before any state is written. A failure on any item leaves the
     /// contract state unchanged.
-    ///
-    /// # Events
-    /// Emits `balance_credited` for each item in the batch.
-    ///
-    /// # Panics
-    /// * `"batch_receive_payment requires at least one item"` — empty batch
-    /// * `"batch too large"` — more than [`MAX_BATCH_SIZE`] items
-    /// * `"amount must be positive"` — any amount ≤ 0
-    /// * `"developer balance overflow"` — `i128` overflow on any developer balance
-    pub fn batch_receive_payment(env: Env, caller: Address, items: Vec<(Address, i128)>) {
+    pub fn batch_receive_payment(env: Env, caller: Address, items: Vec<(Option<Address>, bool, i128)>) {
         caller.require_auth();
         Self::require_authorized_caller(env.clone(), caller.clone());
 
@@ -321,44 +314,78 @@ impl CalloraSettlement {
         assert!(n > 0, "batch_receive_payment requires at least one item");
         assert!(n <= MAX_BATCH_SIZE, "batch too large");
 
-        // Validate all amounts before touching state.
+        // Validate all items before touching state.
         for item in items.iter() {
-            let (_, amount) = item;
+            let (dev, to_pool, amount) = item;
             assert!(amount > 0, "amount must be positive");
+            if to_pool {
+                assert!(dev.is_none(), "DeveloperMustBeNone");
+            } else {
+                assert!(dev.is_some(), "DeveloperRequired");
+            }
         }
 
         let inst = env.storage().instance();
+        
+        let mut total_pool_credit = 0i128;
 
         for item in items.iter() {
-            let (dev, amount) = item;
-            let current: i128 = env
-                .storage()
-                .persistent()
-                .get(&StorageKey::DeveloperBalance(dev.clone()))
-                .unwrap_or(0);
-            let new_balance = current
-                .checked_add(amount)
-                .unwrap_or_else(|| env.panic_with_error(SettlementError::DeveloperOverflow));
-            env.storage()
-                .persistent()
-                .set(&StorageKey::DeveloperBalance(dev.clone()), &new_balance);
-            env.storage()
-                .persistent()
-                .extend_ttl(&StorageKey::DeveloperBalance(dev.clone()), 50000, 50000);
-            // Add to index if not already present
-            let mut index: Vec<Address> = inst
-                .get(&StorageKey::DeveloperIndex)
-                .unwrap_or_else(|| Vec::new(&env));
-            if !index.iter().any(|a| a == dev) {
-                index.push_back(dev.clone());
-                inst.set(&StorageKey::DeveloperIndex, &index);
+            let (dev_opt, to_pool, amount) = item;
+            if to_pool {
+                total_pool_credit = total_pool_credit.checked_add(amount).unwrap_or_else(|| env.panic_with_error(SettlementError::PoolOverflow));
+            } else {
+                let dev = dev_opt.unwrap();
+                let current: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&StorageKey::DeveloperBalance(dev.clone()))
+                    .unwrap_or(0);
+                let new_balance = current
+                    .checked_add(amount)
+                    .unwrap_or_else(|| env.panic_with_error(SettlementError::DeveloperOverflow));
+                env.storage()
+                    .persistent()
+                    .set(&StorageKey::DeveloperBalance(dev.clone()), &new_balance);
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&StorageKey::DeveloperBalance(dev.clone()), 50000, 50000);
+                
+                // Add to index if not already present
+                let mut index: Vec<Address> = inst
+                    .get(&StorageKey::DeveloperIndex)
+                    .unwrap_or_else(|| Vec::new(&env));
+                if !index.iter().any(|a| a == dev) {
+                    index.push_back(dev.clone());
+                    inst.set(&StorageKey::DeveloperIndex, &index);
+                }
+                
+                env.events().publish(
+                    (Symbol::new(&env, "balance_credited"), dev.clone()),
+                    BalanceCreditedEvent {
+                        developer: dev.clone(),
+                        amount: amount,
+                        new_balance,
+                    },
+                );
             }
+        }
+        
+        if total_pool_credit > 0 {
+            let mut global_pool = Self::get_global_pool(env.clone());
+            global_pool.total_balance = global_pool
+                .total_balance
+                .checked_add(total_pool_credit)
+                .unwrap_or_else(|| env.panic_with_error(SettlementError::PoolOverflow));
+            global_pool.last_updated = env.ledger().timestamp();
+            inst.set(&StorageKey::GlobalPool, &global_pool);
+            
             env.events().publish(
-                (Symbol::new(&env, "balance_credited"), dev.clone()),
-                BalanceCreditedEvent {
-                    developer: dev.clone(),
-                    amount: amount,
-                    new_balance,
+                (Symbol::new(&env, "payment_received"), caller.clone()),
+                PaymentReceivedEvent {
+                    from_vault: caller.clone(),
+                    amount: total_pool_credit,
+                    to_pool: true,
+                    developer: None,
                 },
             );
         }
@@ -833,3 +860,6 @@ mod test;
 
 #[cfg(test)]
 mod test_views;
+
+#[cfg(test)]
+mod test_batch_receive_fuzz;
