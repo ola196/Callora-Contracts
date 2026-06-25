@@ -78,27 +78,47 @@ fn bench_batch_distribute(k: u32) -> (u64, u64) {
     let cpu_before = env.cost_estimate().budget().cpu_instruction_cost();
     let mem_before = env.cost_estimate().budget().memory_bytes_cost();
     client.batch_distribute(&admin, &payments);
-    let cpu = env.cost_estimate().budget().cpu_instruction_cost().saturating_sub(cpu_before);
-    let mem = env.cost_estimate().budget().memory_bytes_cost().saturating_sub(mem_before);
+    let cpu = env
+        .cost_estimate()
+        .budget()
+        .cpu_instruction_cost()
+        .saturating_sub(cpu_before);
+    let mem = env
+        .cost_estimate()
+        .budget()
+        .memory_bytes_cost()
+        .saturating_sub(mem_before);
     (cpu, mem)
 }
 
 #[test]
 fn bench_revenue_pool_batch_distribute_k1() {
     let (cpu, mem) = bench_batch_distribute(1);
-    std::println!("GAS| revenue_pool::batch_distribute_k1 | {} | {} | revenue_pool::batch_distribute[k=1]", cpu, mem);
+    std::println!(
+        "GAS| revenue_pool::batch_distribute_k1 | {} | {} | revenue_pool::batch_distribute[k=1]",
+        cpu,
+        mem
+    );
 }
 
 #[test]
 fn bench_revenue_pool_batch_distribute_k10() {
     let (cpu, mem) = bench_batch_distribute(10);
-    std::println!("GAS| revenue_pool::batch_distribute_k10 | {} | {} | revenue_pool::batch_distribute[k=10]", cpu, mem);
+    std::println!(
+        "GAS| revenue_pool::batch_distribute_k10 | {} | {} | revenue_pool::batch_distribute[k=10]",
+        cpu,
+        mem
+    );
 }
 
 #[test]
 fn bench_revenue_pool_batch_distribute_k50() {
     let (cpu, mem) = bench_batch_distribute(MAX_BATCH_SIZE);
-    std::println!("GAS| revenue_pool::batch_distribute_k50 | {} | {} | revenue_pool::batch_distribute[k=50]", cpu, mem);
+    std::println!(
+        "GAS| revenue_pool::batch_distribute_k50 | {} | {} | revenue_pool::batch_distribute[k=50]",
+        cpu,
+        mem
+    );
 }
 
 #[test]
@@ -113,5 +133,10 @@ fn bench_revenue_pool_receive_payment() {
     let cpu_before = env.cost_estimate().budget().cpu_instruction_cost();
     let mem_before = env.cost_estimate().budget().memory_bytes_cost();
     client.receive_payment(&admin, &1000, &true);
-    gas("revenue_pool::receive_payment", &env, cpu_before, mem_before);
+    gas(
+        "revenue_pool::receive_payment",
+        &env,
+        cpu_before,
+        mem_before,
+    );
 }

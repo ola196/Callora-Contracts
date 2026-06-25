@@ -133,27 +133,47 @@ fn bench_batch_deduct(k: u32) -> (u64, u64) {
     let cpu_before = env.cost_estimate().budget().cpu_instruction_cost();
     let mem_before = env.cost_estimate().budget().memory_bytes_cost();
     client.batch_deduct(&owner, &items);
-    let cpu = env.cost_estimate().budget().cpu_instruction_cost().saturating_sub(cpu_before);
-    let mem = env.cost_estimate().budget().memory_bytes_cost().saturating_sub(mem_before);
+    let cpu = env
+        .cost_estimate()
+        .budget()
+        .cpu_instruction_cost()
+        .saturating_sub(cpu_before);
+    let mem = env
+        .cost_estimate()
+        .budget()
+        .memory_bytes_cost()
+        .saturating_sub(mem_before);
     (cpu, mem)
 }
 
 #[test]
 fn bench_vault_batch_deduct_k1() {
     let (cpu, mem) = bench_batch_deduct(1);
-    std::println!("GAS| vault::batch_deduct_k1 | {} | {} | vault::batch_deduct[k=1]", cpu, mem);
+    std::println!(
+        "GAS| vault::batch_deduct_k1 | {} | {} | vault::batch_deduct[k=1]",
+        cpu,
+        mem
+    );
 }
 
 #[test]
 fn bench_vault_batch_deduct_k10() {
     let (cpu, mem) = bench_batch_deduct(10);
-    std::println!("GAS| vault::batch_deduct_k10 | {} | {} | vault::batch_deduct[k=10]", cpu, mem);
+    std::println!(
+        "GAS| vault::batch_deduct_k10 | {} | {} | vault::batch_deduct[k=10]",
+        cpu,
+        mem
+    );
 }
 
 #[test]
 fn bench_vault_batch_deduct_k50() {
     let (cpu, mem) = bench_batch_deduct(MAX_BATCH_SIZE);
-    std::println!("GAS| vault::batch_deduct_k50 | {} | {} | vault::batch_deduct[k=50]", cpu, mem);
+    std::println!(
+        "GAS| vault::batch_deduct_k50 | {} | {} | vault::batch_deduct[k=50]",
+        cpu,
+        mem
+    );
 }
 
 #[test]

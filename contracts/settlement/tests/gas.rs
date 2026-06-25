@@ -71,8 +71,16 @@ fn bench_batch_receive_payment(k: u32) -> (u64, u64) {
     let cpu_before = env.cost_estimate().budget().cpu_instruction_cost();
     let mem_before = env.cost_estimate().budget().memory_bytes_cost();
     client.batch_receive_payment(&vault, &items);
-    let cpu = env.cost_estimate().budget().cpu_instruction_cost().saturating_sub(cpu_before);
-    let mem = env.cost_estimate().budget().memory_bytes_cost().saturating_sub(mem_before);
+    let cpu = env
+        .cost_estimate()
+        .budget()
+        .cpu_instruction_cost()
+        .saturating_sub(cpu_before);
+    let mem = env
+        .cost_estimate()
+        .budget()
+        .memory_bytes_cost()
+        .saturating_sub(mem_before);
     (cpu, mem)
 }
 
@@ -112,5 +120,10 @@ fn bench_settlement_withdraw_developer_balance() {
     let cpu_before = env.cost_estimate().budget().cpu_instruction_cost();
     let mem_before = env.cost_estimate().budget().memory_bytes_cost();
     client.withdraw_developer_balance(&developer, &500i128);
-    gas("settlement::withdraw_developer_balance", &env, cpu_before, mem_before);
+    gas(
+        "settlement::withdraw_developer_balance",
+        &env,
+        cpu_before,
+        mem_before,
+    );
 }
