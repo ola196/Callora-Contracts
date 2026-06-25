@@ -1387,3 +1387,6 @@ mod test_idempotency;
 
 #[cfg(test)]
 mod test_reentrancy;
+
+#[cfg(test)]
+mod test_balance_property;
