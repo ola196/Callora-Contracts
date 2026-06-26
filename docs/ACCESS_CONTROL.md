@@ -6,11 +6,12 @@
 The Callora Vault implements role-based access control for deposit operations to ensure only authorized parties can increase the vault balance.
 
 ### Roles
-- **Owner**: Set during contract initialization. Exclusive authority to manage allowed depositors and withdraw funds.
+- **Owner**: Set during contract initialization. Exclusive authority to manage allowed depositors, withdraw funds, and propose revenue pool changes.
 - **Allowed Depositor**: Addresses approved by the owner to handle automated deposits.
 - **Authorized Caller**: Optional address permitted to trigger `deduct` operations.
 - **Pending Owner**: Nominee awaiting acceptance of the owner role.
 - **Pending Admin**: Nominee awaiting acceptance of the admin role.
+- **Pending Revenue Pool**: Proposed revenue pool address awaiting acceptance.
 
 ### Authorization Matrix
 
@@ -30,6 +31,9 @@ The Callora Vault implements role-based access control for deposit operations to
 | `set_admin` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `accept_admin` | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `cancel_admin_transfer` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `propose_revenue_pool` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `accept_revenue_pool` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `cancel_revenue_pool` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `pause` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `unpause` | ✅ | ❌ | ❌ | ❌ | ❌ |
 
@@ -38,6 +42,30 @@ The Callora Vault implements role-based access control for deposit operations to
 - **Two-Step Admin Rotation**: Prevents accidental loss of control by requiring the nominee to explicitly accept the role.
 - **Cancellation Safety**: Provides `cancel_ownership_transfer` and `cancel_admin_transfer` functions to abort mistaken nominations before acceptance.
 - **Restricted Depositors**: Only owner and explicitly allowed depositors can increase vault balance.
+- **Nonce-Bound Authorized-Caller Rotation**: `set_authorized_caller` requires the caller to supply the current monotonic nonce (see below), preventing a leaked owner signature from being replayed to reinstate a stale `authorized_caller`.
+
+### Authorized-Caller Replay Protection
+
+`set_authorized_caller` maintains a monotonic `u64` nonce stored under
+`StorageKey::AuthorizedCallerNonce` in instance storage.
+
+| Step | Who | Action |
+|------|-----|--------|
+| 1 | Integrator | Call `get_authorized_caller_nonce()` to read the current nonce (defaults to `0`). |
+| 2 | Owner | Call `set_authorized_caller(new_caller, expected_nonce)` with the value from step 1. |
+| 3 | Contract | Verifies `expected_nonce == stored_nonce`; rejects with `VaultError::StaleNonce` if not. |
+| 4 | Contract | Increments the stored nonce (`wrapping_add(1)`) and emits it in the event payload. |
+
+**Replay resistance**: a captured owner signature contains a fixed `expected_nonce`.
+After one successful rotation the stored nonce advances, so the captured signature is
+permanently invalid.
+
+**Event payload**: the `set_authorized_caller` event now carries
+`(old_caller, new_caller, consumed_nonce)` as data, allowing off-chain indexers to
+detect nonce gaps.
+
+**Nonce wrap**: the nonce wraps to `0` after `u64::MAX` rotations (2^64 calls) — a
+practical impossibility, but handled safely by `wrapping_add`.
 
 ### Cancellation Functions
 
@@ -91,6 +119,15 @@ The Callora Settlement contract tracks individual developer balances and global 
 
 ## Test Coverage
 The implementation includes comprehensive tests covering:
+- ✅ `set_authorized_caller` default nonce is `0` before first rotation
+- ✅ First rotation with nonce `0` succeeds and advances stored nonce to `1`
+- ✅ Replaying a consumed nonce is rejected with `VaultError::StaleNonce`
+- ✅ Supplying a future nonce is rejected with `VaultError::StaleNonce`
+- ✅ Three sequential rotations each advance the nonce correctly
+- ✅ Nonce wraps at `u64::MAX` via `wrapping_add`
+- ✅ Failed rotations do not advance the stored nonce
+- ✅ Successful rotation emits `(old, new, consumed_nonce)` in the event payload
+- ✅ Vault self-address is rejected as `new_caller`
 - ✅ Admin and Vault can call `receive_payment`
 - ✅ Unauthorized callers are rejected from `receive_payment`
 - ✅ Only Admin can call `set_admin` and `propose_vault` (and the `set_vault` alias)

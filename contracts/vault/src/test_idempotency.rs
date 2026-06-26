@@ -11,11 +11,79 @@
 extern crate std;
 
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{token, Address, Env, Symbol};
+use soroban_sdk::{token, Address, Env, Symbol, Vec};
 
 use super::*;
 
 use callora_settlement::CalloraSettlement;
+
+/// Deterministic PRNG for seeded property tests.
+///
+/// This simple 64-bit LCG is adequate for generating deterministic trace
+/// variants without pulling in an external RNG dependency.
+struct Prng {
+    state: u64,
+}
+
+impl Prng {
+    fn new(seed: u64) -> Self {
+        Self {
+            state: seed.wrapping_add(0x9E37_79B9_7F4A_7C15),
+        }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self
+            .state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        self.state
+    }
+
+    fn gen_range_i128(&mut self, min: i128, max_inclusive: i128) -> i128 {
+        if min >= max_inclusive {
+            return min;
+        }
+        let span = (max_inclusive - min) as u64 + 1;
+        min + (self.next_u64() % span) as i128
+    }
+
+    fn gen_range_usize(&mut self, min: usize, max_inclusive: usize) -> usize {
+        if min >= max_inclusive {
+            return min;
+        }
+        let span = max_inclusive - min + 1;
+        min + (self.next_u64() as usize % span)
+    }
+}
+
+fn build_duplicate_batch(
+    env: &Env,
+    seed: u64,
+    batch_size: usize,
+) -> (Vec<DeductItem>, Symbol) {
+    let mut rng = Prng::new(seed);
+    let first_dup = rng.gen_range_usize(0, batch_size - 1);
+    let mut second_dup = rng.gen_range_usize(0, batch_size - 1);
+    while second_dup == first_dup {
+        second_dup = rng.gen_range_usize(0, batch_size - 1);
+    }
+
+    let duplicate_id = Symbol::new(env, &format!("dup_{}_{}", seed, first_dup));
+    let mut items: Vec<DeductItem> = Vec::new(env);
+
+    for i in 0..batch_size {
+        let amount = rng.gen_range_i128(1, 50);
+        let request_id = if i == first_dup || i == second_dup {
+            Some(duplicate_id.clone())
+        } else {
+            Some(Symbol::new(env, &format!("req_{}_{}", seed, i)))
+        };
+        items.push_back(DeductItem { amount, request_id });
+    }
+
+    (items, duplicate_id)
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -43,7 +111,8 @@ fn create_vault(env: &Env) -> (Address, CalloraVaultClient<'_>) {
 /// Register and initialize the settlement contract.
 fn create_settlement(env: &Env, admin: &Address, vault_address: &Address) -> Address {
     let settlement_address = env.register(CalloraSettlement, ());
-    let settlement_client = callora_settlement::CalloraSettlementClient::new(env, &settlement_address);
+    let settlement_client =
+        callora_settlement::CalloraSettlementClient::new(env, &settlement_address);
     settlement_client.init(admin, vault_address);
     settlement_address
 }
@@ -86,13 +155,14 @@ fn deduct_duplicate_request_id_rejected() {
 
     // Second call with same request_id — must be rejected.
     let result = client.try_deduct(&owner, &100, &Some(rid.clone()));
-    assert!(
-        result.is_err(),
-        "duplicate request_id must be rejected"
-    );
+    assert!(result.is_err(), "duplicate request_id must be rejected");
 
     // Balance must be unchanged after the rejected retry.
-    assert_eq!(client.balance(), 900, "balance must not change on duplicate");
+    assert_eq!(
+        client.balance(),
+        900,
+        "balance must not change on duplicate"
+    );
 }
 
 /// Two distinct `request_id` values each succeed independently.
@@ -241,7 +311,11 @@ fn batch_deduct_duplicate_request_id_rejected_atomically() {
     assert!(result.is_err(), "batch with duplicate id must be rejected");
 
     // Balance must be unchanged — full atomicity.
-    assert_eq!(client.balance(), 900, "balance must not change on duplicate batch");
+    assert_eq!(
+        client.balance(),
+        900,
+        "balance must not change on duplicate batch"
+    );
 }
 
 /// A batch where two items share the same new `request_id` is rejected.
@@ -277,6 +351,33 @@ fn batch_deduct_two_items_same_new_id_rejected() {
         !client.is_request_processed(&rid),
         "rejected batch must not mark request_id"
     );
+}
+
+/// A varying set of batch sizes with seeded duplicate positions must be rejected
+/// atomically when the same `request_id` appears twice within a single batch.
+#[test]
+fn batch_deduct_duplicate_request_id_within_batch_rejected_atomically() {
+    for seed in 0..32 {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, client, _, owner) = setup_vault(&env, 10_000);
+
+        let batch_size = 2 + (seed as usize % (MAX_BATCH_SIZE as usize - 1));
+        let (items, duplicate_id) = build_duplicate_batch(&env, seed, batch_size);
+        let starting_balance = client.balance();
+
+        let result = client.try_batch_deduct(&owner, &items);
+        assert!(
+            result.is_err(),
+            "seed {seed} batch with duplicate request_id must be rejected"
+        );
+        assert_eq!(result.unwrap_err(), VaultError::DuplicateRequestId);
+        assert_eq!(client.balance(), starting_balance);
+        assert!(
+            !client.is_request_processed(&duplicate_id),
+            "rejected batch must not mark duplicate request_id"
+        );
+    }
 }
 
 /// A batch with all distinct `Some` ids succeeds and marks all of them.
@@ -381,7 +482,10 @@ fn deduct_retry_with_different_amount_still_rejected() {
 
     // Retry with a different amount — still rejected.
     let result = client.try_deduct(&owner, &50, &Some(rid.clone()));
-    assert!(result.is_err(), "retry with different amount must be rejected");
+    assert!(
+        result.is_err(),
+        "retry with different amount must be rejected"
+    );
     assert_eq!(client.balance(), 900);
 }
 
@@ -422,4 +526,100 @@ fn batch_deduct_mixed_ids_marks_only_some_ids() {
 
     // None deducts still go through.
     assert_eq!(client.deduct(&owner, &10, &None), 765);
+}
+
+#[test]
+fn replay_across_long_window_rejected() {
+    let env = Env::default();
+    let (_, client, _, owner) = setup_vault(&env, 1_000);
+
+    let rid = Symbol::new(&env, "req_long_win");
+    
+    // First call succeeds
+    client.deduct(&owner, &100, &Some(rid.clone()));
+    
+    // Fast-forward ledger 6 months (approx 6 * 30 days)
+    let new_timestamp = env.ledger().timestamp() + 180 * 24 * 60 * 60;
+    env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: new_timestamp,
+        protocol_version: 20,
+        sequence_number: env.ledger().sequence() + 180 * 17_280,
+        network_id: env.ledger().network_id(),
+        base_reserve: env.ledger().base_reserve(),
+        max_entry_expiration: env.ledger().max_entry_expiration(),
+        min_temp_entry_expiration: env.ledger().min_temp_entry_expiration(),
+        min_persistent_entry_expiration: env.ledger().min_persistent_entry_expiration(),
+    });
+    
+    // Retry should still be rejected because it's persistent and hasn't been explicitly pruned.
+    let res = client.try_deduct(&owner, &100, &Some(rid.clone()));
+    assert!(res.is_err(), "should still reject after multi-month window");
+}
+
+#[test]
+fn gc_entrypoint_prunes_and_emits_event() {
+    let env = Env::default();
+    let (_, client, _, owner) = setup_vault(&env, 1_000);
+
+    let rid1 = Symbol::new(&env, "req_gc_1");
+    let rid2 = Symbol::new(&env, "req_gc_2");
+    
+    client.deduct(&owner, &100, &Some(rid1.clone()));
+    client.deduct(&owner, &100, &Some(rid2.clone()));
+    
+    let mut ids_to_prune = soroban_sdk::Vec::new(&env);
+    ids_to_prune.push_back(rid1.clone());
+    
+    client.prune_processed_requests(&owner, &ids_to_prune).unwrap();
+    
+    assert_eq!(client.is_request_processed(&rid1), false);
+    assert_eq!(client.is_request_processed(&rid2), true);
+    
+    let events = env.events().all();
+    let mut has_event = false;
+    for ev in events.iter() {
+        if let Ok(topic) = soroban_sdk::Symbol::try_from_val(&env, &ev.1.get(0).unwrap()) {
+            if topic == Symbol::new(&env, "request_id_pruned") {
+                has_event = true;
+                break;
+            }
+        }
+    }
+    assert!(has_event, "Should emit request_id_pruned event");
+    
+    // Should now be able to replay rid1
+    client.deduct(&owner, &100, &Some(rid1));
+}
+
+#[test]
+fn gc_ignores_unknown_ids() {
+    let env = Env::default();
+    let (_, client, _, owner) = setup_vault(&env, 1_000);
+
+    let rid_unknown = Symbol::new(&env, "req_unknown");
+    
+    let mut ids_to_prune = soroban_sdk::Vec::new(&env);
+    ids_to_prune.push_back(rid_unknown.clone());
+    
+    // Shouldn't fail, just skips
+    client.prune_processed_requests(&owner, &ids_to_prune).unwrap();
+}
+
+#[test]
+fn gc_allowed_during_pause() {
+    let env = Env::default();
+    let (_, client, _, owner) = setup_vault(&env, 1_000);
+
+    let rid1 = Symbol::new(&env, "req_gc_pause");
+    client.deduct(&owner, &100, &Some(rid1.clone()));
+    
+    client.pause(&owner);
+    assert!(client.is_paused());
+    
+    let mut ids_to_prune = soroban_sdk::Vec::new(&env);
+    ids_to_prune.push_back(rid1.clone());
+    
+    // Prune should succeed even when paused
+    client.prune_processed_requests(&owner, &ids_to_prune).unwrap();
+    assert_eq!(client.is_request_processed(&rid1), false);
 }
