@@ -678,8 +678,11 @@ impl CalloraVault {
         // Transfer USDC from caller to vault. If this panics, the Soroban host
         // reverts the entire transaction — the Effects above are atomically rolled
         // back, leaving no inconsistent state.
-        token::Client::new(&env, &usdc_addr)
-            .transfer(&caller, &env.current_contract_address(), &amount);
+        token::Client::new(&env, &usdc_addr).transfer(
+            &caller,
+            &env.current_contract_address(),
+            &amount,
+        );
 
         Ok(meta.balance)
     }
@@ -735,14 +738,14 @@ impl CalloraVault {
             .instance()
             .get(&StorageKey::UsdcToken)
             .ok_or(VaultError::NotInitialized)?;
-        
-        // SECURITY: Perform all external operations FIRST. 
+
+        // SECURITY: Perform all external operations FIRST.
         // Although this is a CEI violation (Check-Effect-Interaction), re-entry is
         // blocked by Soroban's authorization model. Each call to `deduct` requires
-        // `caller.require_auth()`, which prevents recursive calls from stealing 
+        // `caller.require_auth()`, which prevents recursive calls from stealing
         // authorization unless the user explicitly signs a nested call.
         Self::transfer_funds(&env, &ut, &settlement, amount);
-        
+
         // Create a settlement client and call receive_payment to credit the global pool
         let settlement_client = SettlementClient::new(&env, &settlement);
         settlement_client.receive_payment(
@@ -751,7 +754,7 @@ impl CalloraVault {
             &true, // to_pool = true: credit global pool
             &None, // no specific developer
         );
-        
+
         // Now that external operations succeeded, update internal state
         let mut meta = Self::get_meta(env.clone())?;
         meta.balance = meta
@@ -766,7 +769,7 @@ impl CalloraVault {
         if let Some(ref rid) = request_id {
             Self::mark_request_processed(&env, rid);
         }
-        
+
         let rid = request_id.unwrap_or(Symbol::new(&env, ""));
         env.events().publish(
             (events::event_deduct(&env), caller, rid),
@@ -834,7 +837,9 @@ impl CalloraVault {
                 }
                 seen_in_batch.push_back(rid.clone());
             }
-            running = running.checked_sub(item.amount).ok_or(VaultError::Overflow)?;
+            running = running
+                .checked_sub(item.amount)
+                .ok_or(VaultError::Overflow)?;
             total = total.checked_add(item.amount).ok_or(VaultError::Overflow)?;
         }
         let settlement = Self::require_settlement(&env)?;
@@ -843,11 +848,11 @@ impl CalloraVault {
             .instance()
             .get(&StorageKey::UsdcToken)
             .ok_or(VaultError::NotInitialized)?;
-        
+
         // SECURITY: External operations performed before internal state update.
         // Protected by `require_auth` and Soroban invocation semantics.
         Self::transfer_funds(&env, &ut, &settlement, total);
-        
+
         // Create a settlement client and call receive_payment to credit the global pool
         let settlement_client = SettlementClient::new(&env, &settlement);
         settlement_client.receive_payment(
@@ -856,7 +861,7 @@ impl CalloraVault {
             &true, // to_pool = true: credit global pool
             &None, // no specific developer
         );
-        
+
         // Now that external operations succeeded, update internal state
         let mut meta = Self::get_meta(env.clone())?;
         meta.balance = running;
@@ -870,7 +875,7 @@ impl CalloraVault {
                 Self::mark_request_processed(&env, rid);
             }
         }
-        
+
         for item in items.iter() {
             let rid = item.request_id.unwrap_or(Symbol::new(&env, ""));
             env.events().publish(
@@ -940,7 +945,10 @@ impl CalloraVault {
             &meta.owner,
             &amount,
         );
-        meta.balance = meta.balance.checked_sub(amount).ok_or(VaultError::Overflow)?;
+        meta.balance = meta
+            .balance
+            .checked_sub(amount)
+            .ok_or(VaultError::Overflow)?;
         env.storage().instance().set(&StorageKey::MetaKey, &meta);
         env.storage()
             .instance()
@@ -967,7 +975,10 @@ impl CalloraVault {
             .get(&StorageKey::UsdcToken)
             .ok_or(VaultError::NotInitialized)?;
         token::Client::new(&env, &ua).transfer(&env.current_contract_address(), &to, &amount);
-        meta.balance = meta.balance.checked_sub(amount).ok_or(VaultError::Overflow)?;
+        meta.balance = meta
+            .balance
+            .checked_sub(amount)
+            .ok_or(VaultError::Overflow)?;
         env.storage().instance().set(&StorageKey::MetaKey, &meta);
         env.storage()
             .instance()
@@ -1130,7 +1141,12 @@ impl CalloraVault {
     /// # Errors
     /// - `VaultError::OfferingIdTooLong` when `offering_id` exceeds maximum length.
     /// - `VaultError::PriceParseError` when `price` cannot be parsed to a positive i128.
-    pub fn set_price(env: Env, caller: Address, offering_id: String, price: String) -> Result<(), VaultError> {
+    pub fn set_price(
+        env: Env,
+        caller: Address,
+        offering_id: String,
+        price: String,
+    ) -> Result<(), VaultError> {
         caller.require_auth();
         Self::require_owner(env.clone(), caller.clone())?;
         if Self::validate_vault_input(&offering_id).is_err() {
@@ -1298,12 +1314,12 @@ impl CalloraVault {
     /// See UPGRADE.md for the complete operational flow.
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         caller.require_auth();
-        let admin = Self::get_admin(env.clone())
-            .expect("vault must be initialized before upgrade");
+        let admin = Self::get_admin(env.clone()).expect("vault must be initialized before upgrade");
 
         // Perform the on-chain upgrade via the deployer interface.
         // This is a host operation and may only succeed in the live environment.
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
 
         // Persist the version marker for on-chain queries.
         env.storage()

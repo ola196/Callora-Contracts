@@ -35,15 +35,15 @@ pub const MAX_DEVELOPER_BALANCES_PAGE_SIZE: u32 = 100;
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
 pub enum SettlementError {
-    NotInitialized               = 1,
-    AlreadyInitialized           = 2,
-    Unauthorized                 = 3,
-    AmountNotPositive            = 4,
-    DeveloperRequired            = 5,
-    DeveloperMustBeNone          = 6,
-    PoolOverflow                 = 7,
-    DeveloperOverflow            = 8,
-    UsdcTokenNotConfigured       = 9,
+    NotInitialized = 1,
+    AlreadyInitialized = 2,
+    Unauthorized = 3,
+    AmountNotPositive = 4,
+    DeveloperRequired = 5,
+    DeveloperMustBeNone = 6,
+    PoolOverflow = 7,
+    DeveloperOverflow = 8,
+    UsdcTokenNotConfigured = 9,
     InsufficientDeveloperBalance = 10,
     DeveloperBalanceUnderflow    = 11,
     InsufficientContractBalance  = 12,
@@ -288,7 +288,7 @@ impl CalloraSettlement {
             let new_balance = current_balance
                 .checked_add(amount)
                 .unwrap_or_else(|| env.panic_with_error(SettlementError::DeveloperOverflow));
-            
+
             // Write to persistent storage with TTL extension
             env.storage().persistent().set(
                 &StorageKey::DeveloperBalance(dev_address.clone()),
@@ -532,12 +532,15 @@ impl CalloraSettlement {
 
         usdc.transfer(&contract_address, &developer, &amount);
 
-        env.storage()
-            .persistent()
-            .set(&StorageKey::DeveloperBalance(developer.clone()), &new_balance);
-        env.storage()
-            .persistent()
-            .extend_ttl(&StorageKey::DeveloperBalance(developer.clone()), 50000, 50000);
+        env.storage().persistent().set(
+            &StorageKey::DeveloperBalance(developer.clone()),
+            &new_balance,
+        );
+        env.storage().persistent().extend_ttl(
+            &StorageKey::DeveloperBalance(developer.clone()),
+            50000,
+            50000,
+        );
 
         // Update daily withdrawal accumulator
         let today = env.ledger().timestamp() / 86400;
@@ -941,9 +944,7 @@ impl CalloraSettlement {
     /// # Returns
     /// `Some(Address)` of the nominated admin, or `None` when no transfer is pending.
     pub fn get_pending_admin(env: Env) -> Option<Address> {
-        env.storage()
-            .instance()
-            .get(&StorageKey::PendingAdmin)
+        env.storage().instance().get(&StorageKey::PendingAdmin)
     }
 
     /// Nominate a new admin (admin only).
