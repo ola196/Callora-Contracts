@@ -38,6 +38,21 @@ Additional hardening note:
 - [x] View function is read-only, deterministic, and non-panicking
 - [x] Safe default state (returns `false` when unset)
 
+#### Pause Allowlist Matrix (Issue #443)
+
+When the vault is paused, the following entrypoint behavior is enforced:
+
+| Entrypoint | Paused State | Rationale |
+|------------|-----------|-----------|
+| `deposit` | **BLOCKED** — returns `VaultError::Paused` | Prevents new funds entering during incident |
+| `deduct` | **BLOCKED** — returns `VaultError::Paused` | Prevents deductions during incident |
+| `batch_deduct` | **BLOCKED** — returns `VaultError::Paused` | Prevents batch deductions during incident |
+| `withdraw` | **ALLOWED** | Emergency recovery — owner can extract tracked balance |
+| `withdraw_to` | **ALLOWED** | Emergency recovery — owner can extract to arbitrary address |
+| `distribute` | **ALLOWED** | Emergency recovery — admin can move untracked on-ledger surplus |
+
+**Test Coverage:** Full matrix asserted in dedicated test module `contracts/vault/src/test_pause_matrix.rs` (20+ tests covering blocked/allowed per-entrypoint, pause/unpause lifecycle, idempotency, auth enforcement, event emission, and balance immutability on rejected calls).
+
 ### Admin Transfer
 
 - [x] Ownership transfer is two-step (optional but recommended)

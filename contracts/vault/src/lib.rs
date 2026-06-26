@@ -1586,3 +1586,6 @@ mod test_reentrancy;
 
 #[cfg(test)]
 mod test_balance_property;
+
+#[cfg(test)]
+mod test_pause_matrix;
