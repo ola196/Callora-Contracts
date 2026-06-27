@@ -1,4 +1,4 @@
-# Event Schema
+﻿# Event Schema
 
 Events emitted by all Callora contracts for indexers, frontends, and auditors.
 All topic/data types refer to Soroban/Stellar XDR values.
@@ -675,6 +675,61 @@ three payments, three `batch_distribute` events are emitted in order.
 
 ---
 
+
+---
+
+### `yield_deposited`
+
+Emitted when the treasury deposits accumulated protocol yield into the revenue pool
+via `deposit_yield()`. The cumulative tracker is updated atomically with the transfer.
+
+| Index   | Location | Type    | Description                                            |
+|---------|----------|---------|--------------------------------------------------------|
+| topic 0 | topics   | Symbol  | `"yield_deposited"`                                    |
+| topic 1 | topics   | Address | `treasury` -- current admin who called `deposit_yield`  |
+| data[0] | data     | i128    | `amount` -- USDC deposited in this call (stroops)       |
+| data[1] | data     | Symbol  | `source` -- short label, e.g. `"fees"` or `"yield"`    |
+| data[2] | data     | i128    | `cumulative_yield_deposited` -- running total after deposit |
+
+```json
+{
+  "topics": ["yield_deposited", "GTREASURY..."],
+  "data": [5000000, "fees", 42000000]
+}
+```
+
+> `cumulative_yield_deposited` equals `get_cumulative_yield_deposited()` immediately
+> after the emitting transaction. It never decreases and panics on `i128` overflow.
+
+---
+
+### `admin_broadcast`
+
+Emitted when the admin publishes an emergency message via `broadcast()`.
+No tokens are moved; this is an out-of-band signaling channel for indexers and frontends.
+
+| Index   | Location | Type             | Description                                    |
+|---------|----------|------------------|------------------------------------------------|
+| topic 0 | topics   | Symbol           | `"admin_broadcast"`                            |
+| topic 1 | topics   | Address          | `caller` -- must be current admin               |
+| data    | data     | `AdminBroadcast`   | struct with `severity` and `message` fields    |
+
+`AdminBroadcast` struct fields:
+
+| Field      | Type     | Description                                      |
+|------------|----------|--------------------------------------------------|
+| `severity` | Severity | One of `Info`, `Warn`, or `Crit`                 |
+| `message`  | String   | Broadcast text; max 256 characters, never empty  |
+
+```json
+{
+  "topics": ["admin_broadcast", "GADMIN..."],
+  "data": { "severity": "Crit", "message": "Emergency: pausing distribution pending audit." }
+}
+```
+
+> Indexers SHOULD alert on `severity = Crit`. The `message` field is capped at
+> 256 characters; longer strings are rejected before the event is emitted.
 ## Contract: `callora-settlement` (v0.1.0)
 
 Source: [`contracts/settlement/src/lib.rs`](contracts/settlement/src/lib.rs).
@@ -928,6 +983,8 @@ operational edge cases (off-chain payment reconciliation, dispute resolution).
 | `receive_payment`        | revenue-pool    | `receive_payment()`                      |
 | `distribute`             | revenue-pool    | `distribute()`                           |
 | `batch_distribute`       | revenue-pool    | each payment in `batch_distribute()`     |
+| `yield_deposited`        | revenue-pool    | `deposit_yield()`                        |
+| `admin_broadcast`        | revenue-pool    | `broadcast()`                            |
 | `payment_received`       | settlement      | `receive_payment()`                      |
 | `balance_credited`       | settlement      | `receive_payment()` with `to_pool=false` |
 | `vault_changed`          | settlement      | `set_vault()`                            |
