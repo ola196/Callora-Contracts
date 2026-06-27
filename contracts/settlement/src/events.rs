@@ -76,6 +76,13 @@ pub fn event_vault_accepted(env: &Env) -> Symbol {
     Symbol::new(env, "vault_accepted")
 }
 
+/// Returns the Symbol for the `"admin_broadcast"` event topic.
+///
+/// Emitted when the admin broadcasts an emergency message.
+pub fn event_admin_broadcast(env: &Env) -> Symbol {
+    Symbol::new(env, "admin_broadcast")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +152,12 @@ mod tests {
     fn test_event_vault_accepted_bytes() {
         let env = Env::default();
         assert_eq!(event_vault_accepted(&env), Symbol::new(&env, "vault_accepted"));
+    }
+
+    /// Snapshot: proves event_admin_broadcast still maps to exactly the bytes for "admin_broadcast".
+    #[test]
+    fn test_event_admin_broadcast_bytes() {
+        let env = Env::default();
+        assert_eq!(event_admin_broadcast(&env), Symbol::new(&env, "admin_broadcast"));
     }
 }
