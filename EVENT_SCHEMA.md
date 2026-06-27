@@ -676,6 +676,74 @@ three payments, three `batch_distribute` events are emitted in order.
 ---
 
 
+
+---
+
+### `pause_set`
+
+Emitted by both `pause()` (data = `true`) and `unpause()` (data = `false`) to signal
+a change in the pool's pause state. Only the admin may trigger either function.
+
+| Index   | Location | Type    | Description                                      |
+|---------|----------|---------|--------------------------------------------------|
+| topic 0 | topics   | Symbol  | `"pause_set"`                                    |
+| topic 1 | topics   | Address | `caller` -- the admin who called pause/unpause   |
+| data    | data     | bool    | `true` = pool is now paused; `false` = unpaused  |
+
+```json
+{ "topics": ["pause_set", "GADMIN..."], "data": true }
+```
+
+> While paused, `distribute` and `batch_distribute` are blocked.
+> Admin rotation (`set_admin`, `claim_admin`) remains available.
+
+---
+
+### `admin_cancelled`
+
+Emitted when the current admin cancels a pending two-step admin transfer via
+`cancel_admin_transfer()`. Both the current and the pending admin are recorded as topics
+so indexers can link the cancellation to the in-flight handover without a data decode.
+
+| Index   | Location | Type    | Description                                        |
+|---------|-----------|---------|----------------------------------------------------|
+| topic 0 | topics    | Symbol  | `"admin_cancelled"`                                |
+| topic 1 | topics    | Address | `current_admin` -- admin who issued the cancel     |
+| topic 2 | topics    | Address | `pending_admin` -- nominee whose claim is revoked  |
+| data    | data      | ()      | empty                                              |
+
+```json
+{
+  "topics": ["admin_cancelled", "GCURRENT_ADMIN...", "GPENDING_ADMIN..."],
+  "data": null
+}
+```
+
+> After this event `get_pending_admin()` returns `None`. The current admin remains
+> unchanged and may initiate a new transfer at any time.
+
+---
+
+### `upgraded`
+
+Emitted when the admin upgrades the contract WASM via `upgrade()`. The new WASM hash
+is persisted to instance storage and is queryable via `get_version()`.
+
+| Index   | Location | Type       | Description                                       |
+|---------|----------|------------|---------------------------------------------------|
+| topic 0 | topics   | Symbol     | `"upgraded"`                                      |
+| topic 1 | topics   | Address    | `caller` -- admin who executed the upgrade        |
+| data    | data     | BytesN<32> | `new_wasm_hash` -- hash of the deployed WASM blob |
+
+```json
+{
+  "topics": ["upgraded", "GADMIN..."],
+  "data": "a1b2c3d4e5f6..."
+}
+```
+
+> `get_version()` returns this hash immediately after the transaction. Only one WASM
+> version is stored; calling `upgrade()` again overwrites the previous value.
 ---
 
 ### `yield_deposited`
@@ -983,6 +1051,9 @@ operational edge cases (off-chain payment reconciliation, dispute resolution).
 | `receive_payment`        | revenue-pool    | `receive_payment()`                      |
 | `distribute`             | revenue-pool    | `distribute()`                           |
 | `batch_distribute`       | revenue-pool    | each payment in `batch_distribute()`     |
+| `pause_set`              | revenue-pool    | `pause()` / `unpause()`                  |
+| `admin_cancelled`        | revenue-pool    | `cancel_admin_transfer()`                |
+| `upgraded`               | revenue-pool    | `upgrade()`                              |
 | `yield_deposited`        | revenue-pool    | `deposit_yield()`                        |
 | `admin_broadcast`        | revenue-pool    | `broadcast()`                            |
 | `payment_received`       | settlement      | `receive_payment()`                      |
