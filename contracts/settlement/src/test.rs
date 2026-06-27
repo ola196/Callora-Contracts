@@ -1252,6 +1252,89 @@ mod settlement_tests {
         assert!(data.developer.is_none());
     }
 
+    /// Snapshot: asserts the full `PaymentReceivedEvent` struct shape and values
+    /// in a single comparison, for the to_pool=true branch. Any future change to
+    /// the struct's fields or this call's emitted values will fail this test,
+    /// making accidental output-structure drift impossible to miss.
+    #[test]
+    fn test_payment_received_event_snapshot_to_pool() {
+        use soroban_sdk::testutils::Events as _;
+        use soroban_sdk::{IntoVal, Symbol};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let vault = Address::generate(&env);
+        let addr = env.register(CalloraSettlement, ());
+        let client = CalloraSettlementClient::new(&env, &addr);
+        client.init(&admin, &vault);
+
+        client.receive_payment(&vault, &750i128, &true, &None);
+
+        let events = env.events().all();
+        let ev = events
+            .iter()
+            .find(|e| {
+                !e.1.is_empty() && {
+                    let t: Symbol = e.1.get(0).unwrap().into_val(&env);
+                    t == Symbol::new(&env, "payment_received")
+                }
+            })
+            .expect("expected payment_received event");
+
+        let data: crate::PaymentReceivedEvent = ev.2.into_val(&env);
+
+        let expected = crate::PaymentReceivedEvent {
+            from_vault: vault.clone(),
+            amount: 750i128,
+            to_pool: true,
+            developer: None,
+        };
+
+        assert_eq!(data, expected);
+    }
+
+    /// Snapshot: asserts the full `PaymentReceivedEvent` struct shape and values
+    /// in a single comparison, for the to_pool=false (developer) branch.
+    #[test]
+    fn test_payment_received_event_snapshot_to_developer() {
+        use soroban_sdk::testutils::Events as _;
+        use soroban_sdk::{IntoVal, Symbol};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let vault = Address::generate(&env);
+        let developer = Address::generate(&env);
+        let addr = env.register(CalloraSettlement, ());
+        let client = CalloraSettlementClient::new(&env, &addr);
+        client.init(&admin, &vault);
+
+        client.receive_payment(&vault, &321i128, &false, &Some(developer.clone()));
+
+        let events = env.events().all();
+        let ev = events
+            .iter()
+            .find(|e| {
+                !e.1.is_empty() && {
+                    let t: Symbol = e.1.get(0).unwrap().into_val(&env);
+                    t == Symbol::new(&env, "payment_received")
+                }
+            })
+            .expect("expected payment_received event");
+
+        let data: crate::PaymentReceivedEvent = ev.2.into_val(&env);
+
+        let expected = crate::PaymentReceivedEvent {
+            from_vault: vault.clone(),
+            amount: 321i128,
+            to_pool: false,
+            developer: Some(developer.clone()),
+        };
+
+        assert_eq!(data, expected);
+    }
+
     #[test]
     fn test_payment_received_and_balance_credited_events_to_developer() {
         use soroban_sdk::testutils::Events as _;
