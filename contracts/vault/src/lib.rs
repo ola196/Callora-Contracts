@@ -111,6 +111,8 @@ pub enum VaultError {
     NewRevenuePoolSameAsCurrent = 33,
     /// No revenue pool transfer is pending (code 34).
     NoRevenuePoolTransferPending = 34,
+    /// Calculated fee in basis points exceeds the caller-supplied `max_fee_bps` limit (code 35).
+    Slippage = 35,
 }
 
 #[contracttype]
@@ -727,6 +729,18 @@ impl CalloraVault {
     /// - `caller` must be the owner or `authorized_caller`.
     /// - Vault balance must cover `amount`.
     ///
+    /// # Per-Call Slippage Guard (`max_fee_bps`)
+    /// `max_fee_bps` limits the deducted amount expressed as a fraction of the current
+    /// vault balance in basis points (1 bps = 0.01%).
+    ///
+    /// `calculated_fee_bps = (amount * 10_000) / balance`
+    ///
+    /// If `calculated_fee_bps > max_fee_bps` the call reverts with
+    /// `VaultError::Slippage` **before** any state is mutated.
+    ///
+    /// Pass `u16::MAX` (65535) to disable the guard and preserve the existing
+    /// unrestricted behaviour — this is the default for backward compatibility.
+    ///
     /// # Idempotency
     /// When `request_id` is `Some(id)`, the contract checks whether `id` has
     /// already been processed.  If so, `VaultError::DuplicateRequestId` is
@@ -744,6 +758,7 @@ impl CalloraVault {
         caller: Address,
         amount: i128,
         request_id: Option<Symbol>,
+        max_fee_bps: u16,
     ) -> Result<i128, VaultError> {
         Self::require_not_paused(env.clone())?;
         caller.require_auth();
@@ -762,6 +777,18 @@ impl CalloraVault {
         let meta = Self::get_meta(env.clone())?;
         if meta.balance < amount {
             return Err(VaultError::InsufficientBalance);
+        }
+        // Slippage guard: reject if the deducted amount exceeds max_fee_bps of the
+        // current balance. Calculated before any state mutation or external call.
+        // Uses u16::MAX as the sentinel for "no limit" (backward-compatible default).
+        if max_fee_bps < u16::MAX && meta.balance > 0 {
+            let calculated_fee_bps = amount
+                .checked_mul(10_000)
+                .ok_or(VaultError::Overflow)?
+                / meta.balance;
+            if calculated_fee_bps > max_fee_bps as i128 {
+                return Err(VaultError::Slippage);
+            }
         }
         let settlement = Self::require_settlement(&env)?;
         let ut: Address = env
