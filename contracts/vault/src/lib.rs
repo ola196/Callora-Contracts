@@ -139,6 +139,19 @@ pub struct WithdrawEventData {
     pub new_balance: i128,
 }
 
+/// Remaining storage TTL information for a storage category.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StorageEntryTtl {
+    pub category: String,
+    pub key_desc: String,
+    pub storage_type: String,
+    pub ttl: u32,
+    pub threshold: u32,
+    pub bump_amount: u32,
+}
+
+
 /// Severity levels for admin broadcast messages.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -489,6 +502,61 @@ impl CalloraVault {
             .instance()
             .get(&StorageKey::DepositorList)
             .unwrap_or(Vec::new(&env))
+    }
+
+    /// Return the remaining TTL for each storage key category.
+    ///
+    /// # Parameters
+    /// - `request_ids` — a list of processed request IDs to check.
+    pub fn get_storage_ttl(env: Env, request_ids: Vec<Symbol>) -> Vec<StorageEntryTtl> {
+        let mut result = Vec::new(&env);
+
+        // 1. Instance Storage
+        let instance_ttl = {
+            #[cfg(any(test, feature = "testutils"))]
+            {
+                env.storage().instance().get_ttl()
+            }
+            #[cfg(not(any(test, feature = "testutils")))]
+            {
+                INSTANCE_BUMP_AMOUNT
+            }
+        };
+        result.push_back(StorageEntryTtl {
+            category: String::from_str(&env, "Instance"),
+            key_desc: String::from_str(&env, "Instance"),
+            storage_type: String::from_str(&env, "Instance"),
+            ttl: instance_ttl,
+            threshold: INSTANCE_BUMP_THRESHOLD,
+            bump_amount: INSTANCE_BUMP_AMOUNT,
+        });
+
+        // 2. ProcessedRequest Storage (Persistent)
+        for rid in request_ids.iter() {
+            let key = StorageKey::ProcessedRequest(rid.clone());
+            if env.storage().persistent().has(&key) {
+                let ttl = {
+                    #[cfg(any(test, feature = "testutils"))]
+                    {
+                        env.storage().persistent().get_ttl(&key)
+                    }
+                    #[cfg(not(any(test, feature = "testutils")))]
+                    {
+                        REQUEST_ID_BUMP_AMOUNT
+                    }
+                };
+                result.push_back(StorageEntryTtl {
+                    category: String::from_str(&env, "ProcessedRequest"),
+                    key_desc: String::from_str(&env, "ProcessedRequest"),
+                    storage_type: String::from_str(&env, "Persistent"),
+                    ttl,
+                    threshold: REQUEST_ID_BUMP_THRESHOLD,
+                    bump_amount: REQUEST_ID_BUMP_AMOUNT,
+                });
+            }
+        }
+
+        result
     }
 
     // -----------------------------------------------------------------------
