@@ -8,151 +8,36 @@
   "errors": {
     "description": "Typed error codes returned by vault operations. These replace string panics to enable machine-readable error handling.",
     "codes": [
-      {
-        "code": 1,
-        "name": "NotInitialized",
-        "description": "Vault has not been initialized yet."
-      },
-      {
-        "code": 2,
-        "name": "AlreadyInitialized",
-        "description": "Vault has already been initialized."
-      },
-      {
-        "code": 3,
-        "name": "Unauthorized",
-        "description": "Caller is not authorized for this operation."
-      },
-      {
-        "code": 4,
-        "name": "Paused",
-        "description": "Vault is currently paused."
-      },
-      {
-        "code": 5,
-        "name": "InsufficientBalance",
-        "description": "Insufficient balance for the requested operation."
-      },
-      {
-        "code": 6,
-        "name": "AmountNotPositive",
-        "description": "Amount must be positive."
-      },
-      {
-        "code": 7,
-        "name": "ExceedsMaxDeduct",
-        "description": "Deduct amount exceeds the configured maximum."
-      },
-      {
-        "code": 8,
-        "name": "BelowMinDeposit",
-        "description": "Deposit amount is below the configured minimum."
-      },
-      {
-        "code": 9,
-        "name": "Overflow",
-        "description": "Arithmetic overflow detected."
-      },
-      {
-        "code": 10,
-        "name": "InitialBalanceNegative",
-        "description": "Initial balance must be non-negative."
-      },
-      {
-        "code": 11,
-        "name": "MinDepositNotPositive",
-        "description": "Min deposit must be positive."
-      },
-      {
-        "code": 12,
-        "name": "MaxDeductNotPositive",
-        "description": "Max deduct must be positive."
-      },
-      {
-        "code": 13,
-        "name": "MinDepositExceedsMaxDeduct",
-        "description": "Min deposit cannot exceed max deduct."
-      },
-      {
-        "code": 14,
-        "name": "UsdcTokenCannotBeVault",
-        "description": "USDC token address cannot be the vault address."
-      },
-      {
-        "code": 15,
-        "name": "RevenuePoolCannotBeVault",
-        "description": "Revenue pool address cannot be the vault address."
-      },
-      {
-        "code": 16,
-        "name": "AuthorizedCallerCannotBeVault",
-        "description": "Authorized caller address cannot be the vault address."
-      },
-      {
-        "code": 17,
-        "name": "InitialBalanceExceedsOnLedger",
-        "description": "Initial balance exceeds on-ledger USDC balance."
-      },
-      {
-        "code": 18,
-        "name": "AlreadyPaused",
-        "description": "Vault is already paused."
-      },
-      {
-        "code": 19,
-        "name": "NotPaused",
-        "description": "Vault is not paused."
-      },
-      {
-        "code": 20,
-        "name": "SettlementNotSet",
-        "description": "Settlement address has not been configured."
-      },
-      {
-        "code": 21,
-        "name": "BatchEmpty",
-        "description": "Batch deduct requires at least one item."
-      },
-      {
-        "code": 22,
-        "name": "BatchTooLarge",
-        "description": "Batch size exceeds maximum allowed."
-      },
-      {
-        "code": 23,
-        "name": "NewOwnerSameAsCurrent",
-        "description": "New owner must be different from current owner."
-      },
-      {
-        "code": 24,
-        "name": "NoOwnershipTransferPending",
-        "description": "No ownership transfer is pending."
-      },
-      {
-        "code": 25,
-        "name": "NoAdminTransferPending",
-        "description": "No admin transfer is pending."
-      },
-      {
-        "code": 26,
-        "name": "OfferingIdTooLong",
-        "description": "Offering ID exceeds maximum length."
-      },
-      {
-        "code": 27,
-        "name": "MetadataTooLong",
-        "description": "Metadata exceeds maximum length."
-      },
-      {
-        "code": 28,
-        "name": "PriceParseError",
-        "description": "Price parsing error or non‑positive price."
-      },
-      {
-        "code": 29,
-        "name": "DuplicateRequestId",
-        "description": "Duplicate request ID detected; this request_id has already been processed."
-      }
+      { "code": 1, "name": "NotInitialized", "description": "Vault has not been initialized yet." },
+      { "code": 2, "name": "AlreadyInitialized", "description": "Vault has already been initialized." },
+      { "code": 3, "name": "Unauthorized", "description": "Caller is not authorized for this operation." },
+      { "code": 4, "name": "Paused", "description": "Vault is currently paused." },
+      { "code": 5, "name": "InsufficientBalance", "description": "Insufficient balance for the requested operation." },
+      { "code": 6, "name": "AmountNotPositive", "description": "Amount must be positive." },
+      { "code": 7, "name": "ExceedsMaxDeduct", "description": "Deduct amount exceeds the configured maximum." },
+      { "code": 8, "name": "BelowMinDeposit", "description": "Deposit amount is below the configured minimum." },
+      { "code": 9, "name": "Overflow", "description": "Arithmetic overflow detected." },
+      { "code": 10, "name": "InitialBalanceNegative", "description": "Initial balance must be non-negative." },
+      { "code": 11, "name": "MinDepositNotPositive", "description": "Min deposit must be positive." },
+      { "code": 12, "name": "MaxDeductNotPositive", "description": "Max deduct must be positive." },
+      { "code": 13, "name": "MinDepositExceedsMaxDeduct", "description": "Min deposit cannot exceed max deduct." },
+      { "code": 14, "name": "UsdcTokenCannotBeVault", "description": "USDC token address cannot be the vault address." },
+      { "code": 15, "name": "RevenuePoolCannotBeVault", "description": "Revenue pool address cannot be the vault address." },
+      { "code": 16, "name": "AuthorizedCallerCannotBeVault", "description": "Authorized caller address cannot be the vault address." },
+      { "code": 17, "name": "InitialBalanceExceedsOnLedger", "description": "Initial balance exceeds on-ledger USDC balance." },
+      { "code": 18, "name": "AlreadyPaused", "description": "Vault is already paused." },
+      { "code": 19, "name": "NotPaused", "description": "Vault is not paused." },
+      { "code": 20, "name": "SettlementNotSet", "description": "Settlement address has not been configured." },
+      { "code": 21, "name": "BatchEmpty", "description": "Batch deduct requires at least one item." },
+      { "code": 22, "name": "BatchTooLarge", "description": "Batch size exceeds maximum allowed." },
+      { "code": 23, "name": "NewOwnerSameAsCurrent", "description": "New owner must be different from current owner." },
+      { "code": 24, "name": "NoOwnershipTransferPending", "description": "No ownership transfer is pending." },
+      { "code": 25, "name": "NoAdminTransferPending", "description": "No admin transfer is pending." },
+      { "code": 26, "name": "OfferingIdTooLong", "description": "Offering ID exceeds maximum length." },
+      { "code": 27, "name": "MetadataTooLong", "description": "Metadata exceeds maximum length." },
+      { "code": 28, "name": "PriceParseError", "description": "Price parsing error or non‑positive price." },
+      { "code": 29, "name": "DuplicateRequestId", "description": "Duplicate request ID detected; this request_id has already been processed." }
+      { "code": 35, "name": "Slippage", "description": "Calculated fee bps (amount * 10_000 / balance) exceeds the caller-supplied max_fee_bps limit." }
     ]
   },
 
@@ -415,24 +300,10 @@
       "description": "Deduct USDC for a single API call. Decreases the tracked balance and forwards funds to the configured settlement contract. Blocked when paused.",
       "access": "owner OR authorized_caller",
       "params": [
-        {
-          "name": "caller",
-          "type": "Address",
-          "optional": false,
-          "description": "Must be the owner or the authorized_caller; must authorize."
-        },
-        {
-          "name": "amount",
-          "type": "i128",
-          "optional": false,
-          "description": "Amount to deduct; must be > 0 and <= max_deduct."
-        },
-        {
-          "name": "request_id",
-          "type": "Symbol | null",
-          "optional": true,
-          "description": "Optional tracking key emitted in the event. When provided it must be unique across successful deductions."
-        }
+        { "name": "caller",      "type": "Address",       "optional": false, "description": "Must be the owner or the authorized_caller; must authorize." },
+        { "name": "amount",      "type": "i128",          "optional": false, "description": "Amount to deduct; must be > 0 and <= max_deduct." },
+        { "name": "request_id",  "type": "Symbol | null", "optional": true,  "description": "Optional tracking key emitted in the event. When provided it must be unique across successful deductions." },
+        { "name": "max_fee_bps", "type": "u16",           "optional": false, "description": "Per-call slippage guard. Reverts with VaultError::Slippage (35) if (amount * 10_000 / balance) > max_fee_bps. Pass u16::MAX (65535) for no limit (backward-compatible default)." }
       ],
       "returns": "i128 (new balance)",
       "panics": [

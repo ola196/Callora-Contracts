@@ -163,6 +163,7 @@ fn e2e_full_cycle() {
         &h.backend,
         &single_deduct_amount,
         &Some(Symbol::new(&env, "req_single_1")),
+        &u16::MAX,
     );
 
     let batch_items = vec![
@@ -203,6 +204,7 @@ fn e2e_full_cycle() {
         &h.backend,
         &1,
         &Some(Symbol::new(&env, "req_single_1")),
+        &u16::MAX,
     );
     assert!(dup_result.is_err(), "duplicate request_id must be rejected");
     assert_eq!(h.vault.balance(), deposit_amount - total_deducted);
@@ -286,7 +288,7 @@ fn e2e_full_cycle() {
     let blocked_deposit = h.vault.try_deposit(&h.owner, &1_000);
     assert!(blocked_deposit.is_err(), "deposit must be blocked while paused");
 
-    let blocked_deduct = h.vault.try_deduct(&h.backend, &1_000, &None);
+    let blocked_deduct = h.vault.try_deduct(&h.backend, &1_000,  &None, &u16::MAX);
     assert!(blocked_deduct.is_err(), "deduct must be blocked while paused");
 
     // Owner withdraw is explicitly allowed while paused (emergency recovery).

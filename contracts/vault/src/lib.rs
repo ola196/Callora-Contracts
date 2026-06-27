@@ -35,8 +35,85 @@ use soroban_sdk::{
     Symbol, Vec,
 };
 
-mod errors;
-pub use errors::VaultError;
+/// Typed error codes for the Callora Vault contract.
+///
+/// These error codes are returned instead of string panics to enable
+/// machine-readable error handling by integrators using @stellar/stellar-sdk.
+#[contracterror]
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum VaultError {
+    /// Vault has not been initialized yet (code 1).
+    NotInitialized = 1,
+    /// Vault has already been initialized (code 2).
+    AlreadyInitialized = 2,
+    /// Caller is not authorized for this operation (code 3).
+    Unauthorized = 3,
+    /// Vault is currently paused (code 4).
+    Paused = 4,
+    /// Insufficient balance for the requested operation (code 5).
+    InsufficientBalance = 5,
+    /// Amount must be positive (code 6).
+    AmountNotPositive = 6,
+    /// Deduct amount exceeds the configured maximum (code 7).
+    ExceedsMaxDeduct = 7,
+    /// Deposit amount is below the configured minimum (code 8).
+    BelowMinDeposit = 8,
+    /// Arithmetic overflow detected (code 9).
+    Overflow = 9,
+    /// Initial balance must be non-negative (code 10).
+    InitialBalanceNegative = 10,
+    /// Min deposit must be positive (code 11).
+    MinDepositNotPositive = 11,
+    /// Max deduct must be positive (code 12).
+    MaxDeductNotPositive = 12,
+    /// Min deposit cannot exceed max deduct (code 13).
+    MinDepositExceedsMaxDeduct = 13,
+    /// USDC token address cannot be the vault address (code 14).
+    UsdcTokenCannotBeVault = 14,
+    /// Revenue pool address cannot be the vault address (code 15).
+    RevenuePoolCannotBeVault = 15,
+    /// Authorized caller address cannot be the vault address (code 16).
+    AuthorizedCallerCannotBeVault = 16,
+    /// Initial balance exceeds on-ledger USDC balance (code 17).
+    InitialBalanceExceedsOnLedger = 17,
+    /// Vault is already paused (code 18).
+    AlreadyPaused = 18,
+    /// Vault is not paused (code 19).
+    NotPaused = 19,
+    /// Settlement address has not been configured (code 20).
+    SettlementNotSet = 20,
+    /// Batch deduct requires at least one item (code 21).
+    BatchEmpty = 21,
+    /// Batch size exceeds maximum allowed (code 22).
+    BatchTooLarge = 22,
+    /// New owner must be different from current owner (code 23).
+    NewOwnerSameAsCurrent = 23,
+    /// No ownership transfer is pending (code 24).
+    NoOwnershipTransferPending = 24,
+    /// No admin transfer is pending (code 25).
+    NoAdminTransferPending = 25,
+    /// Offering ID exceeds maximum length (code 26).
+    OfferingIdTooLong = 26,
+    /// Metadata exceeds maximum length (code 27).
+    MetadataTooLong = 27,
+    /// Price parsing error or non‑positive price (code 28).
+    PriceParseError = 28,
+    /// Duplicate request ID detected (code 29).
+    DuplicateRequestId = 29,
+    /// Offering ID is empty or contains invalid characters (code 30).
+    OfferingIdInvalid = 30,
+    /// Metadata string is empty or contains invalid characters (code 31).
+    MetadataInvalid = 31,
+    /// Supplied nonce does not match the stored authorized-caller rotation nonce (code 30).
+    StaleNonce = 32,
+    /// New revenue pool must be different from current revenue pool (code 33).
+    NewRevenuePoolSameAsCurrent = 33,
+    /// No revenue pool transfer is pending (code 34).
+    NoRevenuePoolTransferPending = 34,
+    /// Calculated fee in basis points exceeds the caller-supplied `max_fee_bps` limit (code 35).
+    Slippage = 35,
+}
 
 #[contracttype]
 #[derive(Clone)]
@@ -676,6 +753,18 @@ impl CalloraVault {
     /// - `caller` must be the owner or `authorized_caller`.
     /// - Vault balance must cover `amount`.
     ///
+    /// # Per-Call Slippage Guard (`max_fee_bps`)
+    /// `max_fee_bps` limits the deducted amount expressed as a fraction of the current
+    /// vault balance in basis points (1 bps = 0.01%).
+    ///
+    /// `calculated_fee_bps = (amount * 10_000) / balance`
+    ///
+    /// If `calculated_fee_bps > max_fee_bps` the call reverts with
+    /// `VaultError::Slippage` **before** any state is mutated.
+    ///
+    /// Pass `u16::MAX` (65535) to disable the guard and preserve the existing
+    /// unrestricted behaviour — this is the default for backward compatibility.
+    ///
     /// # Idempotency
     /// When `request_id` is `Some(id)`, the contract checks whether `id` has
     /// already been processed.  If so, `VaultError::DuplicateRequestId` is
@@ -693,6 +782,7 @@ impl CalloraVault {
         caller: Address,
         amount: i128,
         request_id: Option<Symbol>,
+        max_fee_bps: u16,
     ) -> Result<i128, VaultError> {
         Self::require_not_paused(env.clone())?;
         caller.require_auth();
@@ -711,6 +801,18 @@ impl CalloraVault {
         let meta = Self::get_meta(env.clone())?;
         if meta.balance < amount {
             return Err(VaultError::InsufficientBalance);
+        }
+        // Slippage guard: reject if the deducted amount exceeds max_fee_bps of the
+        // current balance. Calculated before any state mutation or external call.
+        // Uses u16::MAX as the sentinel for "no limit" (backward-compatible default).
+        if max_fee_bps < u16::MAX && meta.balance > 0 {
+            let calculated_fee_bps = amount
+                .checked_mul(10_000)
+                .ok_or(VaultError::Overflow)?
+                / meta.balance;
+            if calculated_fee_bps > max_fee_bps as i128 {
+                return Err(VaultError::Slippage);
+            }
         }
         let settlement = Self::require_settlement(&env)?;
         let ut: Address = env
