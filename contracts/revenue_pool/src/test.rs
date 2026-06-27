@@ -158,7 +158,9 @@ fn create_usdc<'a>(
         client.pause(&admin);
         assert!(client.is_paused());
 
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| client.distribute(&admin, &developer, &100)));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.distribute(&admin, &developer, &100)
+        }));
         assert!(result.is_err());
     }
 
@@ -2121,7 +2123,7 @@ fn chunk_iter_preserves_order_and_amounts() {
     let env = Env::default();
     let payments = make_payments(&env, 7); // amounts 1..=7
     let chunks = crate::chunk_iter(&env, payments, 3); // [3, 3, 1]
-    // Flatten and assert amounts return in order 1,2,3,4,5,6,7.
+                                                       // Flatten and assert amounts return in order 1,2,3,4,5,6,7.
     let mut expected: i128 = 1;
     for chunk in chunks.iter() {
         for (_, amount) in chunk.iter() {
@@ -2505,4 +2507,78 @@ fn batch_distribute_duplicate_detected_before_balance_check() {
     payments.push_back((dev.clone(), 200_i128));
 
     client.batch_distribute(&admin, &payments);
+}
+
+#[test]
+fn deposit_yield_transfers_from_treasury_and_updates_metric() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (pool_addr, client) = create_pool(&env);
+    let (usdc_address, usdc_client, usdc_admin) = create_usdc(&env, &admin);
+    let source = Symbol::new(&env, "fees");
+
+    client.init(&admin, &usdc_address);
+    usdc_admin.mint(&admin, &1_000);
+
+    client.deposit_yield(&admin, &400, &source);
+
+    assert_eq!(usdc_client.balance(&admin), 600);
+    assert_eq!(usdc_client.balance(&pool_addr), 400);
+    assert_eq!(client.get_cumulative_yield_deposited(), 400);
+
+    let events = env.events().all();
+    let deposit_event = events.last().unwrap();
+    let event_name = Symbol::try_from_val(&env, &deposit_event.1.get(0).unwrap()).unwrap();
+    assert_eq!(event_name, Symbol::new(&env, "yield_deposited"));
+
+    let data: (i128, Symbol, i128) =
+        <(i128, Symbol, i128)>::try_from_val(&env, &deposit_event.2).unwrap();
+    assert_eq!(data, (400, source, 400));
+}
+
+#[test]
+fn deposit_yield_accumulates_multiple_sources() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (pool_addr, client) = create_pool(&env);
+    let (usdc_address, usdc_client, usdc_admin) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    usdc_admin.mint(&admin, &1_000);
+
+    client.deposit_yield(&admin, &250, &Symbol::new(&env, "fees"));
+    client.deposit_yield(&admin, &150, &Symbol::new(&env, "yield"));
+
+    assert_eq!(client.get_cumulative_yield_deposited(), 400);
+    assert_eq!(usdc_client.balance(&pool_addr), 400);
+    assert_eq!(usdc_client.balance(&admin), 600);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: caller is not admin")]
+fn deposit_yield_rejects_non_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let (_, client) = create_pool(&env);
+    let (usdc_address, _, _) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    client.deposit_yield(&attacker, &100, &Symbol::new(&env, "fees"));
+}
+
+#[test]
+#[should_panic(expected = "amount must be positive")]
+fn deposit_yield_rejects_zero_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let (_, client) = create_pool(&env);
+    let (usdc_address, _, _) = create_usdc(&env, &admin);
+
+    client.init(&admin, &usdc_address);
+    client.deposit_yield(&admin, &0, &Symbol::new(&env, "fees"));
 }

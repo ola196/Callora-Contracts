@@ -19,6 +19,7 @@ const ADMIN_KEY: &str = "admin";
 const PENDING_ADMIN_KEY: &str = "pending_admin";
 const USDC_KEY: &str = "usdc";
 const MAX_DISTRIBUTE_KEY: &str = "max_distribute";
+const CUMULATIVE_YIELD_DEPOSITED_KEY: &str = "cumulative_yield_deposited";
 const ERR_AMOUNT_NOT_POSITIVE: &str = "amount must be positive";
 const ERR_AMOUNT_EXCEEDS_MAX_DISTRIBUTE: &str = "amount exceeds max_distribute";
 const ERR_UNAUTHORIZED: &str = "unauthorized: caller is not admin";
@@ -247,10 +248,8 @@ impl RevenuePool {
         inst.remove(&Symbol::new(&env, PENDING_ADMIN_KEY));
         inst.extend_ttl(LIFETIME_THRESHOLD, BUMP_AMOUNT);
 
-        env.events().publish(
-            (events::event_admin_cancelled(&env), current, pending),
-            (),
-        );
+        env.events()
+            .publish((events::event_admin_cancelled(&env), current, pending), ());
     }
 
     /// Return the pending admin address, or `None` if no two-step admin transfer is in progress.
@@ -367,6 +366,76 @@ impl RevenuePool {
             (events::event_receive_payment(&env), caller),
             (amount, from_vault),
         );
+    }
+
+    /// Deposit accumulated protocol yield into the revenue pool.
+    ///
+    /// The current admin acts as the treasury authority. The treasury must
+    /// authorize the call, and USDC is transferred from that treasury address to
+    /// this revenue-pool contract. The cumulative deposited-yield metric is
+    /// updated atomically with the transfer and event emission.
+    ///
+    /// # Arguments
+    /// * `env` - The environment running the contract.
+    /// * `treasury` - Must be the current admin and must authorize the call.
+    /// * `amount` - USDC amount in base units. Must be positive.
+    /// * `source` - Short source label for indexers, e.g. `fees` or `yield`.
+    ///
+    /// # Panics
+    /// * If `treasury` is not the current admin (`"unauthorized: caller is not admin"`).
+    /// * If `amount` is zero or negative (`"amount must be positive"`).
+    /// * If the cumulative metric would overflow (`"cumulative yield overflow"`).
+    /// * If the revenue pool has not been initialized.
+    ///
+    /// # Events
+    /// Emits `yield_deposited` with `treasury` as topic and
+    /// `(amount, source, cumulative_yield_deposited)` as data.
+    pub fn deposit_yield(env: Env, treasury: Address, amount: i128, source: Symbol) {
+        treasury.require_auth();
+        let admin = Self::get_admin(env.clone());
+        if treasury != admin {
+            panic!("{}", ERR_UNAUTHORIZED);
+        }
+        if amount <= 0 {
+            panic!("{}", ERR_AMOUNT_NOT_POSITIVE);
+        }
+
+        let previous_total = Self::get_cumulative_yield_deposited(env.clone());
+        let new_total = match previous_total.checked_add(amount) {
+            Some(total) => total,
+            None => panic!("cumulative yield overflow"),
+        };
+
+        let usdc_address: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, USDC_KEY))
+            .expect(ERR_NOT_INITIALIZED);
+        let usdc = token::Client::new(&env, &usdc_address);
+        let contract_address = env.current_contract_address();
+
+        let inst = env.storage().instance();
+        inst.set(
+            &Symbol::new(&env, CUMULATIVE_YIELD_DEPOSITED_KEY),
+            &new_total,
+        );
+        inst.extend_ttl(LIFETIME_THRESHOLD, BUMP_AMOUNT);
+
+        usdc.transfer(&treasury, &contract_address, &amount);
+        env.events().publish(
+            (events::event_yield_deposited(&env), treasury),
+            (amount, source, new_total),
+        );
+    }
+
+    /// Return the cumulative USDC yield deposited through [`Self::deposit_yield`].
+    ///
+    /// Defaults to zero before the first yield deposit.
+    pub fn get_cumulative_yield_deposited(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&Symbol::new(&env, CUMULATIVE_YIELD_DEPOSITED_KEY))
+            .unwrap_or(0)
     }
 
     /// Get the current per-leg distribution cap.

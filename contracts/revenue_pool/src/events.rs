@@ -60,6 +60,14 @@ pub fn event_receive_payment(env: &Env) -> Symbol {
     Symbol::new(env, "receive_payment")
 }
 
+/// Returns the Symbol for the `"yield_deposited"` event topic.
+///
+/// Emitted when the treasury deposits accumulated protocol yield into the
+/// revenue pool via `deposit_yield`.
+pub fn event_yield_deposited(env: &Env) -> Symbol {
+    Symbol::new(env, "yield_deposited")
+}
+
 /// Returns the Symbol for the `"set_max_distribute"` event topic.
 ///
 /// Emitted when the admin updates the per-leg maximum distribute cap.
@@ -112,7 +120,10 @@ mod tests {
     #[test]
     fn test_event_admin_changed_bytes() {
         let env = Env::default();
-        assert_eq!(event_admin_changed(&env), Symbol::new(&env, "admin_changed"));
+        assert_eq!(
+            event_admin_changed(&env),
+            Symbol::new(&env, "admin_changed")
+        );
     }
 
     /// Snapshot: proves event_admin_transfer_started still maps to exactly the bytes for "admin_transfer_started".
@@ -156,14 +167,30 @@ mod tests {
     #[test]
     fn test_event_receive_payment_bytes() {
         let env = Env::default();
-        assert_eq!(event_receive_payment(&env), Symbol::new(&env, "receive_payment"));
+        assert_eq!(
+            event_receive_payment(&env),
+            Symbol::new(&env, "receive_payment")
+        );
+    }
+
+    /// Snapshot: proves event_yield_deposited still maps to exactly the bytes for "yield_deposited".
+    #[test]
+    fn test_event_yield_deposited_bytes() {
+        let env = Env::default();
+        assert_eq!(
+            event_yield_deposited(&env),
+            Symbol::new(&env, "yield_deposited")
+        );
     }
 
     /// Snapshot: proves event_set_max_distribute still maps to exactly the bytes for "set_max_distribute".
     #[test]
     fn test_event_set_max_distribute_bytes() {
         let env = Env::default();
-        assert_eq!(event_set_max_distribute(&env), Symbol::new(&env, "set_max_distribute"));
+        assert_eq!(
+            event_set_max_distribute(&env),
+            Symbol::new(&env, "set_max_distribute")
+        );
     }
 
     /// Snapshot: proves event_distribute still maps to exactly the bytes for "distribute".
@@ -177,7 +204,10 @@ mod tests {
     #[test]
     fn test_event_batch_distribute_bytes() {
         let env = Env::default();
-        assert_eq!(event_batch_distribute(&env), Symbol::new(&env, "batch_distribute"));
+        assert_eq!(
+            event_batch_distribute(&env),
+            Symbol::new(&env, "batch_distribute")
+        );
     }
 
     /// Snapshot: proves event_upgraded still maps to exactly the bytes for "upgraded".
