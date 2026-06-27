@@ -1247,26 +1247,16 @@ impl CalloraVault {
         Ok(())
     }
 
-    /// Validate that a vault input string is non-empty, contains no control
-    /// characters (0x00–0x1F, 0x7F), and has no leading/trailing whitespace.
-    #[inline(never)]
+    /// Validate that a vault input string is non-empty visible ASCII with no
+    /// leading or trailing whitespace.
+    ///
+    /// The visible-ASCII policy rejects Unicode confusables, zero-width
+    /// characters, bidi overrides, and controls. Accepted strings are already
+    /// NFC-normalized because ASCII has one canonical Unicode representation.
     fn validate_vault_input(s: &String) -> Result<(), ()> {
-        let len = s.len();
-        if len == 0 {
-            return Err(());
-        }
-        let mut buf = [0u8; 256];
-        s.copy_into_slice(&mut buf[..len as usize]);
-        let bytes = &buf[..len as usize];
-        for &b in bytes {
-            if b <= 0x1F || b == 0x7F {
-                return Err(());
-            }
-        }
-        if bytes[0] == 0x20 || bytes[len as usize - 1] == 0x20 {
-            return Err(());
-        }
-        Ok(())
+        validators::is_visible_ascii_metadata(s)
+            .then_some(())
+            .ok_or(())
     }
 
     pub fn set_metadata(
@@ -1277,17 +1267,17 @@ impl CalloraVault {
     ) -> Result<String, VaultError> {
         caller.require_auth();
         Self::require_owner(env.clone(), caller.clone())?;
-        if Self::validate_vault_input(&offering_id).is_err() {
-            return Err(VaultError::OfferingIdInvalid);
-        }
-        if Self::validate_vault_input(&metadata).is_err() {
-            return Err(VaultError::MetadataInvalid);
-        }
         if offering_id.len() > MAX_OFFERING_ID_LEN {
             return Err(VaultError::OfferingIdTooLong);
         }
         if metadata.len() > MAX_METADATA_LEN {
             return Err(VaultError::MetadataTooLong);
+        }
+        if Self::validate_vault_input(&offering_id).is_err() {
+            return Err(VaultError::OfferingIdInvalid);
+        }
+        if Self::validate_vault_input(&metadata).is_err() {
+            return Err(VaultError::MetadataInvalid);
         }
         env.storage()
             .instance()
@@ -1412,6 +1402,12 @@ impl CalloraVault {
         }
         if metadata.len() > MAX_METADATA_LEN {
             return Err(VaultError::MetadataTooLong);
+        }
+        if Self::validate_vault_input(&offering_id).is_err() {
+            return Err(VaultError::OfferingIdInvalid);
+        }
+        if Self::validate_vault_input(&metadata).is_err() {
+            return Err(VaultError::MetadataInvalid);
         }
         let old: String = env
             .storage()
@@ -1695,6 +1691,7 @@ impl CalloraVault {
 }
 
 mod events;
+mod validators;
 
 // ---------------------------------------------------------------------------
 // Test modules
