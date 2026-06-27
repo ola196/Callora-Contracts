@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, token, Address, BytesN, Env, Map, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
 /// Revenue settlement contract: receives USDC from vault deducts and distributes to developers.
@@ -51,6 +51,24 @@ pub const DEFAULT_MAX_DISTRIBUTE: i128 = i128::MAX;
 /// Caps CPU/memory usage well within Soroban resource limits and aligns with
 /// the vault's `MAX_BATCH_SIZE` for `batch_deduct`.
 pub const MAX_BATCH_SIZE: u32 = 50;
+pub const MAX_MESSAGE_LEN: u32 = 256;
+
+/// Severity levels for admin broadcast messages.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Severity {
+    Info,
+    Warn,
+    Crit,
+}
+
+/// Event payload for admin broadcast messages.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminBroadcast {
+    pub severity: Severity,
+    pub message: String,
+}
 
 /// TTL bump constants for instance storage archival risk mitigation.
 /// Soroban archives ledger entries after ~7 days (631 ledgers) of inactivity.
@@ -666,6 +684,40 @@ impl RevenuePool {
         env.storage()
             .instance()
             .get(&Symbol::new(&env, VERSION_KEY))
+    }
+
+    /// Broadcast an emergency message from the admin.
+    ///
+    /// Only the current admin may call this function.
+    /// The message length is capped at 256 characters.
+    ///
+    /// # Arguments
+    /// * `env` - The environment running the contract.
+    /// * `caller` - Must be the current admin; must authorize.
+    /// * `severity` - Severity level of the broadcast (Info/Warn/Crit).
+    /// * `message` - The broadcast message, capped at 256 characters.
+    ///
+    /// # Panics
+    /// * If the caller is not the current admin.
+    /// * If the message length exceeds 256 characters.
+    /// * If the message is empty.
+    pub fn broadcast(env: Env, caller: Address, severity: Severity, message: String) {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone());
+        if caller != admin {
+            panic!("unauthorized: caller is not admin");
+        }
+        let len = message.len();
+        if len == 0 {
+            panic!("message cannot be empty");
+        }
+        if len > MAX_MESSAGE_LEN {
+            panic!("message length exceeds maximum of 256 characters");
+        }
+        env.events().publish(
+            (events::event_admin_broadcast(&env), caller),
+            AdminBroadcast { severity, message },
+        );
     }
 }
 

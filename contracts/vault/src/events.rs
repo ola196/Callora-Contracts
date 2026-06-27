@@ -213,6 +213,13 @@ pub fn event_revenue_pool_cancelled(env: &Env) -> Symbol {
     Symbol::new(env, "revenue_pool_cancelled")
 }
 
+/// Returns the Symbol for the `"admin_broadcast"` event topic.
+///
+/// Emitted when the admin broadcasts an emergency message.
+pub fn event_admin_broadcast(env: &Env) -> Symbol {
+    Symbol::new(env, "admin_broadcast")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +427,13 @@ mod tests {
         let env = soroban_sdk::Env::default();
         let sym = event_revenue_pool_cancelled(&env);
         assert_eq!(sym, Symbol::new(&env, "revenue_pool_cancelled"));
+    }
+
+    /// Snapshot: proves event_admin_broadcast still maps to exactly the bytes for "admin_broadcast".
+    #[test]
+    fn test_event_admin_broadcast_bytes() {
+        let env = soroban_sdk::Env::default();
+        let sym = event_admin_broadcast(&env);
+        assert_eq!(sym, Symbol::new(&env, "admin_broadcast"));
     }
 }

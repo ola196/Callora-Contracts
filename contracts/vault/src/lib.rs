@@ -137,6 +137,23 @@ pub struct WithdrawEventData {
     pub new_balance: i128,
 }
 
+/// Severity levels for admin broadcast messages.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Severity {
+    Info,
+    Warn,
+    Crit,
+}
+
+/// Event payload for admin broadcast messages.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminBroadcast {
+    pub severity: Severity,
+    pub message: String,
+}
+
 /// Canonical storage keys for the Vault contract.
 #[contracttype]
 pub enum StorageKey {
@@ -184,6 +201,7 @@ pub const DEFAULT_MAX_DEDUCT: i128 = i128::MAX;
 pub const DEFAULT_MIN_DEPOSIT: i128 = 1;
 pub const MAX_BATCH_SIZE: u32 = 50;
 pub const MAX_METADATA_LEN: u32 = 256;
+pub const MAX_MESSAGE_LEN: u32 = 256;
 pub const MAX_OFFERING_ID_LEN: u32 = 64;
 pub const MAX_LIST_PRICES_LIMIT: u32 = 100;
 
@@ -1413,6 +1431,26 @@ impl CalloraVault {
     /// After calling `upgrade`, you may need to invoke a separate `migrate` function
     /// (if implemented in the new WASM) to update storage schema or perform data migrations.
     /// See UPGRADE.md for the complete operational flow.
+    pub fn broadcast(env: Env, caller: Address, severity: Severity, message: String) -> Result<(), VaultError> {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone())?;
+        if caller != admin {
+            return Err(VaultError::Unauthorized);
+        }
+        let len = message.len();
+        if len == 0 {
+            panic!("message cannot be empty");
+        }
+        if len > MAX_MESSAGE_LEN {
+            panic!("message length exceeds maximum of 256 characters");
+        }
+        env.events().publish(
+            (events::event_admin_broadcast(&env), caller),
+            AdminBroadcast { severity, message },
+        );
+        Ok(())
+    }
+
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         caller.require_auth();
         let admin = Self::get_admin(env.clone()).expect("vault must be initialized before upgrade");
@@ -1530,6 +1568,40 @@ impl CalloraVault {
         if *caller != admin && *caller != meta.owner {
             return Err(VaultError::Unauthorized);
         }
+        Ok(())
+    }
+
+    /// Broadcast an emergency message from the admin.
+    ///
+    /// Only the current admin may call this function.
+    /// The message length is capped at 256 characters.
+    ///
+    /// # Arguments
+    /// * `env` - The environment running the contract.
+    /// * `caller` - Must be the current admin; must authorize.
+    /// * `severity` - Severity level of the broadcast (Info/Warn/Crit).
+    /// * `message` - The broadcast message, capped at 256 characters.
+    ///
+    /// # Errors
+    /// * `VaultError::Unauthorized` - If the caller is not the current admin.
+    /// * `VaultError::MetadataTooLong` - If the message length exceeds 256 characters.
+    pub fn broadcast(env: Env, caller: Address, severity: Severity, message: String) -> Result<(), VaultError> {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone())?;
+        if caller != admin {
+            return Err(VaultError::Unauthorized);
+        }
+        let len = message.len();
+        if len == 0 {
+            return Err(VaultError::MetadataTooLong); // Reusing existing error for message too long/empty
+        }
+        if len > MAX_MESSAGE_LEN {
+            return Err(VaultError::MetadataTooLong);
+        }
+        env.events().publish(
+            (events::event_admin_broadcast(&env), caller),
+            AdminBroadcast { severity, message },
+        );
         Ok(())
     }
 }

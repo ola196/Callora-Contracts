@@ -1,12 +1,32 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, String, Symbol, Vec};
 
 /// Maximum number of items allowed in a single `batch_receive_payment` call.
 pub const MAX_BATCH_SIZE: u32 = 50;
 
 /// Maximum number of developer balances returned per page in paginated queries.
 pub const MAX_DEVELOPER_BALANCES_PAGE_SIZE: u32 = 100;
+
+/// Maximum length for admin broadcast messages.
+pub const MAX_MESSAGE_LEN: u32 = 256;
+
+/// Severity levels for admin broadcast messages.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Severity {
+    Info,
+    Warn,
+    Crit,
+}
+
+/// Event payload for admin broadcast messages.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminBroadcast {
+    pub severity: Severity,
+    pub message: String,
+}
 
 /// Typed errors for the settlement contract.
 ///
@@ -1173,6 +1193,25 @@ pub fn withdraw_developer_balance(
     /// Only the current admin may call. This will instruct the host to update
     /// the current contract WASM to `new_wasm_hash` and persist the version marker.
     /// Emits an `upgraded` event with the admin as topic and the new version as data.
+    pub fn broadcast(env: Env, caller: Address, severity: Severity, message: String) {
+        caller.require_auth();
+        let admin = Self::get_admin(env.clone());
+        if caller != admin {
+            env.panic_with_error(SettlementError::Unauthorized);
+        }
+        let len = message.len();
+        if len == 0 {
+            panic!("message cannot be empty");
+        }
+        if len > MAX_MESSAGE_LEN {
+            panic!("message length exceeds maximum of 256 characters");
+        }
+        env.events().publish(
+            (events::event_admin_broadcast(&env), caller),
+            AdminBroadcast { severity, message },
+        );
+    }
+
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         caller.require_auth();
         let admin = Self::get_admin(env.clone());

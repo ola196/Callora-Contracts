@@ -89,6 +89,13 @@ pub fn event_upgraded(env: &Env) -> Symbol {
     Symbol::new(env, "upgraded")
 }
 
+/// Returns the Symbol for the `"admin_broadcast"` event topic.
+///
+/// Emitted when the admin broadcasts an emergency message.
+pub fn event_admin_broadcast(env: &Env) -> Symbol {
+    Symbol::new(env, "admin_broadcast")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +185,12 @@ mod tests {
     fn test_event_upgraded_bytes() {
         let env = Env::default();
         assert_eq!(event_upgraded(&env), Symbol::new(&env, "upgraded"));
+    }
+
+    /// Snapshot: proves event_admin_broadcast still maps to exactly the bytes for "admin_broadcast".
+    #[test]
+    fn test_event_admin_broadcast_bytes() {
+        let env = Env::default();
+        assert_eq!(event_admin_broadcast(&env), Symbol::new(&env, "admin_broadcast"));
     }
 }
