@@ -14,7 +14,7 @@ pub const MAX_DEVELOPER_BALANCES_PAGE_SIZE: u32 = 100;
 ///
 /// # Migration note
 /// Discriminant 5 was the original `DeveloperBalance(Address)` (single-token, now
-/// `DeveloperBalanceV1` — kept for migration only).  New per-token entries use
+/// `DeveloperBalanceV1` — kept for migration reads only).  New per-token entries use
 /// `DeveloperBalance(Address, Address)` at discriminant 6.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -24,8 +24,9 @@ pub enum StorageKey {
     PendingAdmin,
     PendingVault,
     DeveloperIndex,
-    /// Legacy single-token balance — kept for migration reads.  Do NOT use for
-    /// new writes.
+    /// Legacy single-token balance — kept for V1 → V2 migration reads only.
+    /// Do **not** use for new writes; new per-token credits go to
+    /// [`StorageKey::DeveloperBalance`].
     DeveloperBalanceV1(Address),
     /// Per-token developer balance `(developer, token)`.
     DeveloperBalance(Address, Address),
@@ -34,6 +35,13 @@ pub enum StorageKey {
     DailyWithdrawCap(Address),
     WithdrawalToday(Address),
     ContractVersion,
+    /// Pending timelock'd developer balance migration record.
+    /// Key: source developer address.
+    PendingDeveloperMigration(Address),
+    /// Storage-layout version marker (u32).
+    /// Absent   → V1 (pre-migration, no version tracking).
+    /// Value 2  → V2 (single-token → per-token migration complete).
+    StorageVersion,
 }
 
 /// Severity levels for admin broadcast messages.
@@ -153,4 +161,15 @@ pub struct DeveloperForceCreditedEvent {
     pub amount: i128,
     pub reason: Symbol,
     pub new_balance: i128,
+}
+
+/// Emitted when the admin proposes or executes a timelock'd developer balance
+/// migration (address rotation).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AdminMigrationEvent {
+    pub from: Address,
+    pub to: Address,
+    pub amount: i128,
+    pub executed_at: u64,
 }
