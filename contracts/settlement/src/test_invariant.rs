@@ -33,6 +33,8 @@
 
 extern crate std;
 
+use std::boxed::Box;
+
 use proptest::prelude::*;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address, Env, Vec};
@@ -189,7 +191,7 @@ fn make_usdc<'a>(
 }
 
 fn setup_env() -> (
-    Env,
+    &'static Env,
     Address,          // contract address
     CalloraSettlementClient<'static>,
     Address,          // admin
@@ -231,13 +233,14 @@ fn check_invariant(
     env: &Env,
     client: &CalloraSettlementClient<'_>,
     admin: &Address,
+    token: &Address,
     expected_dev_total: i128,
     expected_pool_total: i128,
     trace: &Trace,
     step: u32,
 ) {
     // Sum all developer balances via the paginated view.
-    let balances = client.get_all_developer_balances(admin);
+    let balances = client.get_all_developer_balances(admin, token);
     let dev_sum: i128 = balances.iter().map(|b| b.balance).sum();
     let pool = client.get_global_pool().total_balance;
 
@@ -306,7 +309,7 @@ fn run_trace(seed: u64) {
     let mut expected_pool_total: i128 = 0;
 
     // Check invariant at t=0 (empty state).
-    check_invariant(env, &client, &admin, 0, 0, &trace, 0);
+    check_invariant(env, &client, &admin, &usdc_addr, 0, 0, &trace, 0);
 
     for step in 1..=TRACE_LENGTH {
         let op = (rng.next_u64() % OP_COUNT) as u8;
@@ -315,7 +318,7 @@ fn run_trace(seed: u64) {
             x if x == Op::ReceiveDev as u8 => {
                 let dev = devs[rng.gen_usize(0, DEV_POOL_SIZE - 1)].clone();
                 let amount = rng.gen_i128(1, AMOUNT_CAP);
-                client.receive_payment(&vault, &amount, &false, &Some(dev.clone()));
+                client.receive_payment(&vault, &amount, &false, &Some(dev.clone()), &usdc_addr);
                 expected_dev_total = expected_dev_total
                     .checked_add(amount)
                     .expect("test tally overflow");
@@ -328,7 +331,7 @@ fn run_trace(seed: u64) {
 
             x if x == Op::ReceivePool as u8 => {
                 let amount = rng.gen_i128(1, AMOUNT_CAP);
-                client.receive_payment(&vault, &amount, &true, &None);
+                client.receive_payment(&vault, &amount, &true, &None, &usdc_addr);
                 expected_pool_total = expected_pool_total
                     .checked_add(amount)
                     .expect("test tally overflow");
@@ -345,7 +348,7 @@ fn run_trace(seed: u64) {
                     items.push_back((dev, amount));
                     batch_total = batch_total.checked_add(amount).expect("batch tally overflow");
                 }
-                client.batch_receive_payment(&vault, &items);
+                client.batch_receive_payment(&vault, &items, &usdc_addr);
                 expected_dev_total = expected_dev_total
                     .checked_add(batch_total)
                     .expect("test tally overflow");
@@ -359,10 +362,10 @@ fn run_trace(seed: u64) {
             x if x == Op::Withdraw as u8 => {
                 // Pick a developer who has a positive balance.
                 let dev = devs[rng.gen_usize(0, DEV_POOL_SIZE - 1)].clone();
-                let current: i128 = client.get_developer_balance(&dev);
+                let current: i128 = client.get_developer_balance(&dev, &usdc_addr);
                 if current > 0 {
                     let amount = rng.gen_i128(1, current.min(AMOUNT_CAP));
-                    let result = client.try_withdraw_developer_balance(&dev, &amount, &None);
+                    let result = client.try_withdraw_developer_balance(&dev, &amount, &None, &usdc_addr);
                     if result.is_ok() {
                         expected_dev_total = expected_dev_total
                             .checked_sub(amount)
@@ -395,6 +398,7 @@ fn run_trace(seed: u64) {
             env,
             &client,
             &admin,
+            &usdc_addr,
             expected_dev_total,
             expected_pool_total,
             &trace,
@@ -441,14 +445,14 @@ fn test_invariant_pool_only() {
     let amounts = [100i128, 200, 300, 50, 1];
     let mut expected_pool: i128 = 0;
     for (i, &amount) in amounts.iter().enumerate() {
-        client.receive_payment(&vault, &amount, &true, &None);
+        client.receive_payment(&vault, &amount, &true, &None, &usdc_addr);
         expected_pool += amount;
         let pool = client.get_global_pool().total_balance;
         assert_eq!(
             pool, expected_pool,
             "pool invariant failed at step {i}: expected {expected_pool}, got {pool}"
         );
-        let dev_sum: i128 = client.get_all_developer_balances(&admin).iter().map(|b| b.balance).sum();
+        let dev_sum: i128 = client.get_all_developer_balances(&admin, &usdc_addr).iter().map(|b| b.balance).sum();
         assert_eq!(dev_sum, 0, "no developer should have a balance (step {i})");
     }
 }
@@ -475,21 +479,21 @@ fn test_invariant_single_dev_full_withdraw() {
     client.set_usdc_token(&admin, &usdc_addr);
 
     // Credit the developer.
-    client.receive_payment(&vault, &1_000, &false, &Some(dev.clone()));
-    client.receive_payment(&vault, &2_000, &false, &Some(dev.clone()));
-    client.receive_payment(&vault, &500, &false, &Some(dev.clone()));
+    client.receive_payment(&vault, &1_000, &false, &Some(dev.clone()), &usdc_addr);
+    client.receive_payment(&vault, &2_000, &false, &Some(dev.clone()), &usdc_addr);
+    client.receive_payment(&vault, &500, &false, &Some(dev.clone()), &usdc_addr);
 
-    let balance = client.get_developer_balance(&dev);
+    let balance = client.get_developer_balance(&dev, &usdc_addr);
     assert_eq!(balance, 3_500);
 
-    let dev_sum: i128 = client.get_all_developer_balances(&admin).iter().map(|b| b.balance).sum();
+    let dev_sum: i128 = client.get_all_developer_balances(&admin, &usdc_addr).iter().map(|b| b.balance).sum();
     assert_eq!(dev_sum, 3_500, "dev sum before withdraw");
 
     // Full withdraw.
-    client.withdraw_developer_balance(&dev, &3_500, &None);
+    client.withdraw_developer_balance(&dev, &3_500, &None, &usdc_addr);
 
     let dev_sum_after: i128 = client
-        .get_all_developer_balances(&admin)
+        .get_all_developer_balances(&admin, &usdc_addr)
         .iter()
         .map(|b| b.balance)
         .sum();
@@ -522,11 +526,11 @@ fn test_invariant_batch_duplicate_dev() {
     let mut items: Vec<(Address, i128)> = Vec::new(env);
     items.push_back((dev.clone(), 100));
     items.push_back((dev.clone(), 200));
-    client.batch_receive_payment(&vault, &items);
+    client.batch_receive_payment(&vault, &items, &usdc_addr);
 
-    let dev_sum: i128 = client.get_all_developer_balances(&admin).iter().map(|b| b.balance).sum();
+    let dev_sum: i128 = client.get_all_developer_balances(&admin, &usdc_addr).iter().map(|b| b.balance).sum();
     assert_eq!(dev_sum, 300, "batch duplicate dev: expected 300, got {dev_sum}");
-    assert_eq!(client.get_developer_balance(&dev), 300);
+    assert_eq!(client.get_developer_balance(&dev, &usdc_addr), 300);
 }
 
 /// Edge case: interleaved developer and pool payments preserve the full conservation invariant.
@@ -565,14 +569,14 @@ fn test_invariant_interleaved_dev_and_pool() {
 
     for &(to_pool, amount, is_dev1) in ops {
         if to_pool {
-            client.receive_payment(&vault, &amount, &true, &None);
+            client.receive_payment(&vault, &amount, &true, &None, &usdc_addr);
             exp_pool += amount;
         } else {
             let dev = if is_dev1 { dev1.clone() } else { dev2.clone() };
-            client.receive_payment(&vault, &amount, &false, &Some(dev));
+            client.receive_payment(&vault, &amount, &false, &Some(dev), &usdc_addr);
             exp_dev += amount;
         }
-        let dev_sum: i128 = client.get_all_developer_balances(&admin).iter().map(|b| b.balance).sum();
+        let dev_sum: i128 = client.get_all_developer_balances(&admin, &usdc_addr).iter().map(|b| b.balance).sum();
         let pool = client.get_global_pool().total_balance;
         assert_eq!(dev_sum, exp_dev, "dev sum mismatch");
         assert_eq!(pool, exp_pool, "pool mismatch");

@@ -196,6 +196,7 @@ trait Settlement {
         amount: i128,
         to_pool: bool,
         developer: Option<Address>,
+        token: Address,
     );
 }
 
@@ -835,6 +836,7 @@ impl CalloraVault {
             &amount,
             &true, // to_pool = true: credit global pool
             &None, // no specific developer
+            &ut,   // token
         );
 
         // Now that external operations succeeded, update internal state
@@ -942,6 +944,7 @@ impl CalloraVault {
             &total,
             &true, // to_pool = true: credit global pool
             &None, // no specific developer
+            &ut,   // token
         );
 
         // Now that external operations succeeded, update internal state
