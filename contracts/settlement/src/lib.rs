@@ -1188,9 +1188,63 @@ impl CalloraSettlement {
         }
         let _ = env; // env available for future use
     }
+
+    /// One-shot V1 -> V2 storage migration (admin only).
+    ///
+    /// Converts all `DeveloperBalanceV1(addr)` persistent slots to per-token
+    /// `DeveloperBalance(addr, usdc_token)` slots in a single transaction.
+    /// For deployments with more than [`MAX_BATCH_SIZE`] developers use
+    /// [`migrate_v1_to_v2_page`] to spread the work across multiple ledgers.
+    ///
+    /// # Access Control
+    /// Only the current admin may call this function.
+    ///
+    /// # Idempotency
+    /// Safe to call multiple times; re-running after `StorageVersion == 2`
+    /// returns immediately without modifying any state.
+    ///
+    /// # Panics
+    /// - [`SettlementError::NotInitialized`] if the contract is not initialised.
+    /// - [`SettlementError::Unauthorized`] if the caller is not the admin.
+    /// - [`SettlementError::UsdcTokenNotConfigured`] if USDC is not configured.
+    pub fn migrate_v1_to_v2(env: Env, caller: Address) {
+        migrate::migrate_v1_to_v2(&env, &caller);
+    }
+
+    /// Paginated V1 -> V2 storage migration (admin only).
+    ///
+    /// Processes up to `batch_size` (capped at [`MAX_BATCH_SIZE`]) developer
+    /// accounts per call, starting from index position `offset`.
+    ///
+    /// # Returns
+    /// `(next_offset, is_complete)`. When `is_complete` is `true` all developer
+    /// slots have been converted and `StorageVersion` is set to `2`.
+    ///
+    /// # Access Control
+    /// Only the current admin may call this function.
+    ///
+    /// # Idempotency
+    /// Returns `(0, true)` immediately when migration is already complete.
+    pub fn migrate_v1_to_v2_page(
+        env: Env,
+        caller: Address,
+        offset: u32,
+        batch_size: u32,
+    ) -> (u32, bool) {
+        migrate::migrate_v1_to_v2_page(&env, &caller, offset, batch_size)
+    }
+
+    /// Return the current storage-layout version.
+    ///
+    /// `1` = V1 layout (pre-migration or key absent).
+    /// `2` = V2 per-token layout (migration complete).
+    pub fn migration_storage_version(env: Env) -> u32 {
+        migrate::storage_version(&env)
+    }
 }
 
 mod events;
+pub mod migrate;
 
 #[cfg(test)]
 mod test;

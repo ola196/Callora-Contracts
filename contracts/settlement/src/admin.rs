@@ -14,6 +14,15 @@ fn require_admin(env: &Env, caller: &Address) {
     }
 }
 
+/// Retrieve the USDC token address from instance storage, panicking with
+/// [`SettlementError::UsdcTokenNotConfigured`] if it has not been set.
+fn get_usdc(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&StorageKey::Usdc)
+        .unwrap_or_else(|| env.panic_with_error(SettlementError::UsdcTokenNotConfigured))
+}
+
 pub(crate) fn propose_balance_migration(env: &Env, caller: &Address, from: &Address, to: &Address) {
     require_admin(env, caller);
     if from == to {
@@ -23,10 +32,13 @@ pub(crate) fn propose_balance_migration(env: &Env, caller: &Address, from: &Addr
         env.panic_with_error(SettlementError::InvalidMigrationTarget);
     }
 
+    let usdc_token = get_usdc(env);
+
+    // Read the source developer's V2 per-token balance.
     let amount: i128 = env
         .storage()
         .persistent()
-        .get(&StorageKey::DeveloperBalance(from.clone()))
+        .get(&StorageKey::DeveloperBalance(from.clone(), usdc_token.clone()))
         .unwrap_or(0);
     if amount <= 0 {
         env.panic_with_error(SettlementError::NoDeveloperBalance);
@@ -60,26 +72,28 @@ pub(crate) fn execute_balance_migration(env: &Env, caller: &Address, from: &Addr
         env.panic_with_error(SettlementError::TimelockNotExpired);
     }
 
+    let usdc_token = get_usdc(env);
+    let source_key = StorageKey::DeveloperBalance(from.clone(), usdc_token.clone());
+    let destination_key = StorageKey::DeveloperBalance(migration.to.clone(), usdc_token.clone());
+
     let source_balance: i128 = env
         .storage()
         .persistent()
-        .get(&StorageKey::DeveloperBalance(from.clone()))
+        .get(&source_key)
         .unwrap_or(0);
     let new_source_balance = source_balance
         .checked_sub(migration.amount)
-        .filter(|balance| *balance >= 0)
+        .filter(|b| *b >= 0)
         .unwrap_or_else(|| env.panic_with_error(SettlementError::MigrationBalanceChanged));
     let destination_balance: i128 = env
         .storage()
         .persistent()
-        .get(&StorageKey::DeveloperBalance(migration.to.clone()))
+        .get(&destination_key)
         .unwrap_or(0);
     let new_destination_balance = destination_balance
         .checked_add(migration.amount)
         .unwrap_or_else(|| env.panic_with_error(SettlementError::DeveloperOverflow));
 
-    let source_key = StorageKey::DeveloperBalance(from.clone());
-    let destination_key = StorageKey::DeveloperBalance(migration.to.clone());
     env.storage()
         .persistent()
         .set(&source_key, &new_source_balance);
