@@ -37,6 +37,13 @@ pub fn event_daily_withdraw_cap_changed(env: &Env) -> Symbol {
     Symbol::new(env, "daily_withdraw_cap_changed")
 }
 
+/// Returns the Symbol for the `"claim_window_changed"` event topic.
+///
+/// Emitted when the admin sets or clears a developer's claim window.
+pub fn event_developer_claim_window_changed(env: &Env) -> Symbol {
+    Symbol::new(env, "claim_window_changed")
+}
+
 /// Returns the Symbol for the `"admin_nominated"` event topic.
 ///
 /// Emitted when the current admin nominates a new admin via `set_admin`.
@@ -83,6 +90,16 @@ pub fn event_admin_broadcast(env: &Env) -> Symbol {
     Symbol::new(env, "admin_broadcast")
 }
 
+/// Returns the Symbol for a proposed developer balance migration.
+pub fn event_admin_migration_proposed(env: &Env) -> Symbol {
+    Symbol::new(env, "admin_migration_proposed")
+}
+
+/// Returns the Symbol for an executed developer balance migration.
+pub fn event_admin_migration(env: &Env) -> Symbol {
+    Symbol::new(env, "admin_migration")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,21 +109,30 @@ mod tests {
     #[test]
     fn test_event_payment_received_bytes() {
         let env = Env::default();
-        assert_eq!(event_payment_received(&env), Symbol::new(&env, "payment_received"));
+        assert_eq!(
+            event_payment_received(&env),
+            Symbol::new(&env, "payment_received")
+        );
     }
 
     /// Snapshot: proves event_balance_credited still maps to exactly the bytes for "balance_credited".
     #[test]
     fn test_event_balance_credited_bytes() {
         let env = Env::default();
-        assert_eq!(event_balance_credited(&env), Symbol::new(&env, "balance_credited"));
+        assert_eq!(
+            event_balance_credited(&env),
+            Symbol::new(&env, "balance_credited")
+        );
     }
 
     /// Snapshot: proves event_developer_withdraw still maps to exactly the bytes for "developer_withdraw".
     #[test]
     fn test_event_developer_withdraw_bytes() {
         let env = Env::default();
-        assert_eq!(event_developer_withdraw(&env), Symbol::new(&env, "developer_withdraw"));
+        assert_eq!(
+            event_developer_withdraw(&env),
+            Symbol::new(&env, "developer_withdraw")
+        );
     }
 
     /// Snapshot: proves event_daily_withdraw_cap_changed still maps to exactly the bytes for "daily_withdraw_cap_changed".
@@ -119,39 +145,64 @@ mod tests {
         );
     }
 
+    /// Snapshot: proves event_developer_claim_window_changed still maps to exactly the bytes for "claim_window_changed".
+    #[test]
+    fn test_event_developer_claim_window_changed_bytes() {
+        let env = Env::default();
+        assert_eq!(
+            event_developer_claim_window_changed(&env),
+            Symbol::new(&env, "claim_window_changed")
+        );
+    }
+
     /// Snapshot: proves event_admin_nominated still maps to exactly the bytes for "admin_nominated".
     #[test]
     fn test_event_admin_nominated_bytes() {
         let env = Env::default();
-        assert_eq!(event_admin_nominated(&env), Symbol::new(&env, "admin_nominated"));
+        assert_eq!(
+            event_admin_nominated(&env),
+            Symbol::new(&env, "admin_nominated")
+        );
     }
 
     /// Snapshot: proves event_admin_accepted still maps to exactly the bytes for "admin_accepted".
     #[test]
     fn test_event_admin_accepted_bytes() {
         let env = Env::default();
-        assert_eq!(event_admin_accepted(&env), Symbol::new(&env, "admin_accepted"));
+        assert_eq!(
+            event_admin_accepted(&env),
+            Symbol::new(&env, "admin_accepted")
+        );
     }
 
     /// Snapshot: proves event_admin_cancelled still maps to exactly the bytes for "admin_cancelled".
     #[test]
     fn test_event_admin_cancelled_bytes() {
         let env = Env::default();
-        assert_eq!(event_admin_cancelled(&env), Symbol::new(&env, "admin_cancelled"));
+        assert_eq!(
+            event_admin_cancelled(&env),
+            Symbol::new(&env, "admin_cancelled")
+        );
     }
 
     /// Snapshot: proves event_vault_proposed still maps to exactly the bytes for "vault_proposed".
     #[test]
     fn test_event_vault_proposed_bytes() {
         let env = Env::default();
-        assert_eq!(event_vault_proposed(&env), Symbol::new(&env, "vault_proposed"));
+        assert_eq!(
+            event_vault_proposed(&env),
+            Symbol::new(&env, "vault_proposed")
+        );
     }
 
     /// Snapshot: proves event_vault_accepted still maps to exactly the bytes for "vault_accepted".
     #[test]
     fn test_event_vault_accepted_bytes() {
         let env = Env::default();
-        assert_eq!(event_vault_accepted(&env), Symbol::new(&env, "vault_accepted"));
+        assert_eq!(
+            event_vault_accepted(&env),
+            Symbol::new(&env, "vault_accepted")
+        );
     }
 
     /// Snapshot: proves event_admin_broadcast still maps to exactly the bytes for "admin_broadcast".
@@ -159,5 +210,18 @@ mod tests {
     fn test_event_admin_broadcast_bytes() {
         let env = Env::default();
         assert_eq!(event_admin_broadcast(&env), Symbol::new(&env, "admin_broadcast"));
+    }
+
+    #[test]
+    fn test_admin_migration_event_bytes() {
+        let env = Env::default();
+        assert_eq!(
+            event_admin_migration_proposed(&env),
+            Symbol::new(&env, "admin_migration_proposed")
+        );
+        assert_eq!(
+            event_admin_migration(&env),
+            Symbol::new(&env, "admin_migration")
+        );
     }
 }
