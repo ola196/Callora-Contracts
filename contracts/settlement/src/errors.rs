@@ -56,4 +56,5 @@ pub enum SettlementError {
     MigrationNotFound = 20,
     TimelockNotExpired = 21,
     MigrationBalanceChanged = 22,
+    MinimumBalanceRequired = 23,
 }
