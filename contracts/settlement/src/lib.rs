@@ -5,6 +5,8 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, 
 mod errors;
 pub use errors::SettlementError;
 
+mod pagination;
+
 /// Maximum number of items allowed in a single `batch_receive_payment` call.
 pub const MAX_BATCH_SIZE: u32 = 50;
 
@@ -872,62 +874,12 @@ pub fn withdraw_developer_balance(
             env.panic_with_error(SettlementError::Unauthorized);
         }
 
-        // Cap limit to the maximum safe page size.
-        let effective_limit = if limit == 0 {
-            return (Vec::new(&env), None);
-        } else {
-            limit.min(MAX_DEVELOPER_BALANCES_PAGE_SIZE)
-        };
-
         let inst = env.storage().instance();
         let index: Vec<Address> = inst
             .get(&StorageKey::DeveloperIndex)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let mut result: Vec<DeveloperBalance> = Vec::new(&env);
-        // When a cursor is supplied we skip addresses up to and including it.
-        // `past_cursor` becomes true once we have consumed the cursor entry (or
-        // immediately when cursor is None).
-        let mut past_cursor = cursor.is_none();
-        let mut last_address: Option<Address> = None;
-
-        for address in index.iter() {
-            if !past_cursor {
-                if let Some(ref c) = cursor {
-                    if &address == c {
-                        // We've reached the cursor entry; start collecting from next.
-                        past_cursor = true;
-                    }
-                }
-                continue;
-            }
-
-            let balance: i128 = env
-                .storage()
-                .persistent()
-                .get(&StorageKey::DeveloperBalance(address.clone()))
-                .unwrap_or(0i128);
-            result.push_back(DeveloperBalance {
-                address: address.clone(),
-                balance,
-            });
-            last_address = Some(address.clone());
-
-            if result.len() >= effective_limit {
-                break;
-            }
-        }
-
-        // next_cursor is the address of the last record returned, provided the
-        // page is full (meaning there may be more records).  When the page is
-        // not full we have reached the end of the index.
-        let next_cursor = if result.len() >= effective_limit {
-            last_address
-        } else {
-            None
-        };
-
-        (result, next_cursor)
+        pagination::get_page(&env, &index, cursor, limit)
     }
 
     /// Return the remaining TTL for each storage key category.
