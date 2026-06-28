@@ -111,11 +111,14 @@ The Callora Settlement contract tracks individual developer balances and global 
 | `propose_vault` | ✅ | ❌ | ❌ | ❌ |
 | `accept_vault` | ✅ | ✅ | ❌ | ❌ |
 | `set_vault` (alias of `propose_vault`) | ✅ | ❌ | ❌ | ❌ |
+| `set_developer_claim_window` | ✅ | ❌ | ❌ | ❌ |
+| `clear_developer_claim_window` | ✅ | ❌ | ❌ | ❌ |
 | `get_all_developer_balances` | ✅ | ❌ | ❌ | ❌ |
 
 ### Security Model
 - **Two-Step Admin Rotation**: Prevents accidental loss of control by requiring the nominee to explicitly accept the role.
 - **Two-Step Vault Rotation**: Prevents accidentally misrouting settlement credits by requiring the proposed vault to accept (or the admin to finalize).
+- **Per-Developer Claim Windows**: Admins may configure inclusive ledger timestamp windows that restrict when each developer can claim accrued settlement balance. Developers without a configured window remain unrestricted.
 - **Restricted Views**: Sensitive batch queries like `get_all_developer_balances` are restricted to the admin to prevent unnecessary exposure of the full ledger via the contract interface.
 - **Cancellation Safety**: The admin can invoke `cancel_admin_transfer` to clear a mistaken nomination.
 

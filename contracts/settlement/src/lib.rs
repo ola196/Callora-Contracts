@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec,
+};
 
 /// Maximum number of items allowed in a single `batch_receive_payment` call.
 pub const MAX_BATCH_SIZE: u32 = 50;
@@ -31,6 +33,8 @@ pub const MAX_DEVELOPER_BALANCES_PAGE_SIZE: u32 = 100;
 /// | 13   | DailyWithdrawCapExceeded     | Developer's daily withdrawal cap would be exceeded|
 /// | 14   | GasExhaustionRisk            | Index too large for safe full scan; use pagination|
 /// | 15   | ReasonTooLong                | Reason Symbol exceeds maximum allowed length      |
+/// | 16   | InvalidClaimWindow           | Claim window end is before start                  |
+/// | 17   | ClaimWindowClosed            | Claim attempted outside developer's claim window  |
 #[contracterror]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
@@ -45,11 +49,13 @@ pub enum SettlementError {
     DeveloperOverflow = 8,
     UsdcTokenNotConfigured = 9,
     InsufficientDeveloperBalance = 10,
-    DeveloperBalanceUnderflow    = 11,
-    InsufficientContractBalance  = 12,
-    DailyWithdrawCapExceeded     = 13,
-    GasExhaustionRisk            = 14,
-    ReasonTooLong                = 15,
+    DeveloperBalanceUnderflow = 11,
+    InsufficientContractBalance = 12,
+    DailyWithdrawCapExceeded = 13,
+    GasExhaustionRisk = 14,
+    ReasonTooLong = 15,
+    InvalidClaimWindow = 16,
+    ClaimWindowClosed = 17,
 }
 
 /// Persistent storage keys for settlement contract
@@ -66,6 +72,7 @@ pub enum StorageKey {
     Usdc,
     DailyWithdrawCap(Address),
     WithdrawalToday(Address),
+    DeveloperClaimWindow(Address),
     ContractVersion,
 }
 
@@ -101,6 +108,18 @@ pub struct GlobalPool {
 pub struct DailyWithdrawState {
     pub day: u64,
     pub amount: i128,
+}
+
+/// Timestamp range during which a developer may claim accrued balance.
+///
+/// `start_ts` and `end_ts` are ledger timestamps in seconds. The window is
+/// inclusive on both ends: a withdrawal is allowed when
+/// `start_ts <= env.ledger().timestamp() <= end_ts`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeveloperClaimWindow {
+    pub start_ts: u64,
+    pub end_ts: u64,
 }
 
 /// Payment received event
@@ -157,6 +176,16 @@ pub struct DailyWithdrawCapChanged {
     pub new_cap: i128,
 }
 
+/// Emitted when the admin sets or clears a developer claim window.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeveloperClaimWindowChanged {
+    pub developer: Address,
+    pub start_ts: u64,
+    pub end_ts: u64,
+    pub enabled: bool,
+}
+
 /// Emitted when an admin force-credits a developer balance (escape hatch).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -171,7 +200,6 @@ pub struct DeveloperForceCreditedEvent {
 /// The Soroban SDK enforces a 32-byte limit on Symbol values at construction;
 /// this constant is used for explicit defense-in-depth validation.
 pub const MAX_REASON_LENGTH: u32 = 32;
-
 
 #[contract]
 pub struct CalloraSettlement;
@@ -383,9 +411,11 @@ impl CalloraSettlement {
             env.storage()
                 .persistent()
                 .set(&StorageKey::DeveloperBalance(dev.clone()), &new_balance);
-            env.storage()
-                .persistent()
-                .extend_ttl(&StorageKey::DeveloperBalance(dev.clone()), 50000, 50000);
+            env.storage().persistent().extend_ttl(
+                &StorageKey::DeveloperBalance(dev.clone()),
+                50000,
+                50000,
+            );
             // Add to index in sorted order if not already present
             let mut index: Vec<Address> = inst
                 .get(&StorageKey::DeveloperIndex)
@@ -475,125 +505,241 @@ impl CalloraSettlement {
             .ok_or(SettlementError::UsdcTokenNotConfigured)
     }
 
-    /// Withdraw developer balance as USDC to a designated recipient (defaults to the developer).
-///
-/// Requires the developer to authorize the request and the requested amount
-/// to be positive and covered by the tracked developer balance.
-///
-/// # Arguments
-/// * `developer` - Address of the developer withdrawing their balance
-/// * `amount` - Amount to withdraw in USDC micro-units
-/// * `to` - Optional recipient address; if `None`, defaults to `developer`
-///
-/// # Errors
-/// - `AmountNotPositive` if amount is ≤ 0
-/// - `InsufficientDeveloperBalance` if developer balance < amount
-/// - `DailyWithdrawCapExceeded` if daily cap is exceeded
-/// - `DeveloperBalanceUnderflow` if subtraction underflows
-/// - `UsdcTokenNotConfigured` if USDC token not set
-/// - `InsufficientContractBalance` if contract has insufficient USDC
-/// - Panics if `to` is the contract's own address
-pub fn withdraw_developer_balance(
-    env: Env,
-    developer: Address,
-    amount: i128,
-    to: Option<Address>,
-) -> Result<(), SettlementError> {
-    developer.require_auth();
-    if amount <= 0 {
-        return Err(SettlementError::AmountNotPositive);
-    }
+    /// Withdraw developer balance as USDC to a designated recipient.
+    ///
+    /// Requires the developer to authorize the request, the amount to be
+    /// positive, the developer's optional claim window to be open, and the
+    /// requested amount to be covered by the tracked developer balance.
+    ///
+    /// # Arguments
+    /// * `developer` - Address of the developer withdrawing their balance.
+    /// * `amount` - Amount to withdraw in USDC micro-units.
+    /// * `to` - Optional recipient address; if `None`, defaults to `developer`.
+    ///
+    /// # Errors
+    /// - `AmountNotPositive` if amount is <= 0.
+    /// - `ClaimWindowClosed` if a developer claim window exists and the current
+    ///   ledger timestamp is outside that inclusive window.
+    /// - `InsufficientDeveloperBalance` if developer balance < amount.
+    /// - `DailyWithdrawCapExceeded` if daily cap is exceeded.
+    /// - `DeveloperBalanceUnderflow` if subtraction underflows.
+    /// - `UsdcTokenNotConfigured` if USDC token not set.
+    /// - `InsufficientContractBalance` if contract has insufficient USDC.
+    /// - Panics if `to` is the contract's own address.
+    pub fn withdraw_developer_balance(
+        env: Env,
+        developer: Address,
+        amount: i128,
+        to: Option<Address>,
+    ) -> Result<(), SettlementError> {
+        developer.require_auth();
+        if amount <= 0 {
+            return Err(SettlementError::AmountNotPositive);
+        }
 
-    let recipient = to.unwrap_or_else(|| developer.clone());
-    let contract_address = env.current_contract_address();
-    if recipient == contract_address {
-        panic!("invalid recipient: cannot withdraw to contract itself");
-    }
+        let recipient = to.unwrap_or_else(|| developer.clone());
+        let contract_address = env.current_contract_address();
+        if recipient == contract_address {
+            panic!("invalid recipient: cannot withdraw to contract itself");
+        }
 
-    let current_balance: i128 = env
-        .storage()
-        .persistent()
-        .get(&StorageKey::DeveloperBalance(developer.clone()))
-        .unwrap_or(0);
-    if amount > current_balance {
-        return Err(SettlementError::InsufficientDeveloperBalance);
-    }
+        Self::require_claim_window_open(&env, &developer)?;
 
-    let cap: i128 = env
-        .storage()
-        .persistent()
-        .get(&StorageKey::DailyWithdrawCap(developer.clone()))
-        .unwrap_or(0);
-    if cap > 0 {
+        let current_balance: i128 = env
+            .storage()
+            .persistent()
+            .get(&StorageKey::DeveloperBalance(developer.clone()))
+            .unwrap_or(0);
+        if amount > current_balance {
+            return Err(SettlementError::InsufficientDeveloperBalance);
+        }
+
+        let cap: i128 = env
+            .storage()
+            .persistent()
+            .get(&StorageKey::DailyWithdrawCap(developer.clone()))
+            .unwrap_or(0);
+        if cap > 0 {
+            let today = env.ledger().timestamp() / 86400;
+            let mut daily = env
+                .storage()
+                .persistent()
+                .get::<_, DailyWithdrawState>(&StorageKey::WithdrawalToday(developer.clone()))
+                .unwrap_or(DailyWithdrawState {
+                    day: today,
+                    amount: 0,
+                });
+            if daily.day != today {
+                daily.day = today;
+                daily.amount = 0;
+            }
+            if daily.amount.checked_add(amount).is_none_or(|sum| sum > cap) {
+                return Err(SettlementError::DailyWithdrawCapExceeded);
+            }
+        }
+
+        let new_balance = current_balance
+            .checked_sub(amount)
+            .ok_or(SettlementError::DeveloperBalanceUnderflow)?;
+
+        let usdc_address = Self::get_usdc_token(env.clone())?;
+        let usdc = token::Client::new(&env, &usdc_address);
+
+        if usdc.balance(&contract_address) < amount {
+            return Err(SettlementError::InsufficientContractBalance);
+        }
+
+        usdc.transfer(&contract_address, &recipient, &amount);
+
+        env.storage().persistent().set(
+            &StorageKey::DeveloperBalance(developer.clone()),
+            &new_balance,
+        );
+        env.storage().persistent().extend_ttl(
+            &StorageKey::DeveloperBalance(developer.clone()),
+            50000,
+            50000,
+        );
+
         let today = env.ledger().timestamp() / 86400;
         let mut daily = env
             .storage()
             .persistent()
             .get::<_, DailyWithdrawState>(&StorageKey::WithdrawalToday(developer.clone()))
-            .unwrap_or(DailyWithdrawState { day: today, amount: 0 });
+            .unwrap_or(DailyWithdrawState {
+                day: today,
+                amount: 0,
+            });
         if daily.day != today {
             daily.day = today;
             daily.amount = 0;
         }
-        if daily.amount.checked_add(amount).is_none_or(|sum| sum > cap) {
-            return Err(SettlementError::DailyWithdrawCapExceeded);
+        daily.amount = daily.amount.saturating_add(amount);
+        env.storage()
+            .persistent()
+            .set(&StorageKey::WithdrawalToday(developer.clone()), &daily);
+        env.storage().persistent().extend_ttl(
+            &StorageKey::WithdrawalToday(developer.clone()),
+            50000,
+            50000,
+        );
+
+        env.events().publish(
+            (events::event_developer_withdraw(&env), developer.clone()),
+            DeveloperWithdrawEvent {
+                developer,
+                amount,
+                remaining_balance: new_balance,
+                to: recipient,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Configure the inclusive claim window for a developer.
+    ///
+    /// A configured window restricts `withdraw_developer_balance` so the
+    /// developer can claim only when the current ledger timestamp is between
+    /// `start_ts` and `end_ts`, inclusive. Developers with no configured
+    /// window remain claimable at any time.
+    ///
+    /// # Access Control
+    /// Only the current admin can call this function.
+    ///
+    /// # Errors
+    /// - `Unauthorized` if caller is not the current admin.
+    /// - `InvalidClaimWindow` if `end_ts < start_ts`.
+    ///
+    /// # Events
+    /// Emits `developer_claim_window_changed` with `enabled = true`.
+    pub fn set_developer_claim_window(
+        env: Env,
+        caller: Address,
+        developer: Address,
+        start_ts: u64,
+        end_ts: u64,
+    ) -> Result<(), SettlementError> {
+        caller.require_auth();
+        Self::require_admin(env.clone(), caller)?;
+        if end_ts < start_ts {
+            return Err(SettlementError::InvalidClaimWindow);
         }
+
+        let window = DeveloperClaimWindow { start_ts, end_ts };
+        env.storage().persistent().set(
+            &StorageKey::DeveloperClaimWindow(developer.clone()),
+            &window,
+        );
+        env.storage().persistent().extend_ttl(
+            &StorageKey::DeveloperClaimWindow(developer.clone()),
+            50000,
+            50000,
+        );
+
+        env.events().publish(
+            (
+                events::event_developer_claim_window_changed(&env),
+                developer.clone(),
+            ),
+            DeveloperClaimWindowChanged {
+                developer,
+                start_ts,
+                end_ts,
+                enabled: true,
+            },
+        );
+
+        Ok(())
     }
 
-    let new_balance = current_balance
-        .checked_sub(amount)
-        .ok_or(SettlementError::DeveloperBalanceUnderflow)?;
+    /// Clear a developer's claim window and restore unrestricted claiming.
+    ///
+    /// # Access Control
+    /// Only the current admin can call this function.
+    ///
+    /// # Errors
+    /// - `Unauthorized` if caller is not the current admin.
+    ///
+    /// # Events
+    /// Emits `developer_claim_window_changed` with `enabled = false`.
+    pub fn clear_developer_claim_window(
+        env: Env,
+        caller: Address,
+        developer: Address,
+    ) -> Result<(), SettlementError> {
+        caller.require_auth();
+        Self::require_admin(env.clone(), caller)?;
 
-    let usdc_address = Self::get_usdc_token(env.clone())?;
-    let usdc = token::Client::new(&env, &usdc_address);
+        env.storage()
+            .persistent()
+            .remove(&StorageKey::DeveloperClaimWindow(developer.clone()));
 
-    if usdc.balance(&contract_address) < amount {
-        return Err(SettlementError::InsufficientContractBalance);
+        env.events().publish(
+            (
+                events::event_developer_claim_window_changed(&env),
+                developer.clone(),
+            ),
+            DeveloperClaimWindowChanged {
+                developer,
+                start_ts: 0,
+                end_ts: 0,
+                enabled: false,
+            },
+        );
+
+        Ok(())
     }
 
-    usdc.transfer(&contract_address, &recipient, &amount);
-
-    env.storage().persistent().set(
-        &StorageKey::DeveloperBalance(developer.clone()),
-        &new_balance,
-    );
-    env.storage().persistent().extend_ttl(
-        &StorageKey::DeveloperBalance(developer.clone()),
-        50000,
-        50000,
-    );
-
-    // Update daily withdrawal accumulator
-    let today = env.ledger().timestamp() / 86400;
-    let mut daily = env
-        .storage()
-        .persistent()
-        .get::<_, DailyWithdrawState>(&StorageKey::WithdrawalToday(developer.clone()))
-        .unwrap_or(DailyWithdrawState { day: today, amount: 0 });
-    if daily.day != today {
-        daily.day = today;
-        daily.amount = 0;
+    /// Return the configured claim window for a developer, if one exists.
+    pub fn get_developer_claim_window(
+        env: Env,
+        developer: Address,
+    ) -> Option<DeveloperClaimWindow> {
+        env.storage()
+            .persistent()
+            .get(&StorageKey::DeveloperClaimWindow(developer))
     }
-    daily.amount = daily.amount.saturating_add(amount);
-    env.storage()
-        .persistent()
-        .set(&StorageKey::WithdrawalToday(developer.clone()), &daily);
-    env.storage()
-        .persistent()
-        .extend_ttl(&StorageKey::WithdrawalToday(developer.clone()), 50000, 50000);
-
-    env.events().publish(
-        (events::event_developer_withdraw(&env), developer.clone()),
-        DeveloperWithdrawEvent {
-            developer,
-            amount,
-            remaining_balance: new_balance,
-            to: recipient,
-        },
-    );
-
-    Ok(())
-}
 
     /// Set the daily withdrawal cap for a developer (admin only).
     ///
@@ -613,13 +759,18 @@ pub fn withdraw_developer_balance(
         env.storage()
             .persistent()
             .set(&StorageKey::DailyWithdrawCap(developer.clone()), &cap);
-        env.storage()
-            .persistent()
-            .extend_ttl(&StorageKey::DailyWithdrawCap(developer.clone()), 50000, 50000);
+        env.storage().persistent().extend_ttl(
+            &StorageKey::DailyWithdrawCap(developer.clone()),
+            50000,
+            50000,
+        );
 
         env.events().publish(
             (events::event_daily_withdraw_cap_changed(&env), caller),
-            DailyWithdrawCapChanged { developer, new_cap: cap },
+            DailyWithdrawCapChanged {
+                developer,
+                new_cap: cap,
+            },
         );
     }
 
@@ -695,16 +846,15 @@ pub fn withdraw_developer_balance(
             .checked_add(amount)
             .unwrap_or_else(|| env.panic_with_error(SettlementError::DeveloperOverflow));
 
-        env.storage()
-            .persistent()
-            .set(&StorageKey::DeveloperBalance(developer.clone()), &new_balance);
-        env.storage()
-            .persistent()
-            .extend_ttl(
-                &StorageKey::DeveloperBalance(developer.clone()),
-                50000,
-                50000,
-            );
+        env.storage().persistent().set(
+            &StorageKey::DeveloperBalance(developer.clone()),
+            &new_balance,
+        );
+        env.storage().persistent().extend_ttl(
+            &StorageKey::DeveloperBalance(developer.clone()),
+            50000,
+            50000,
+        );
 
         let mut index: Vec<Address> = env
             .storage()
@@ -719,7 +869,10 @@ pub fn withdraw_developer_balance(
         }
 
         env.events().publish(
-            (Symbol::new(&env, "developer_force_credited"), developer.clone()),
+            (
+                Symbol::new(&env, "developer_force_credited"),
+                developer.clone(),
+            ),
             DeveloperForceCreditedEvent {
                 developer,
                 amount,
@@ -1063,10 +1216,8 @@ pub fn withdraw_developer_balance(
 
         inst.remove(&StorageKey::PendingAdmin);
 
-        env.events().publish(
-            (events::event_admin_cancelled(&env), current, pending),
-            (),
-        );
+        env.events()
+            .publish((events::event_admin_cancelled(&env), current, pending), ());
     }
 
     /// Propose a new vault address (admin only).
@@ -1168,6 +1319,28 @@ pub fn withdraw_developer_balance(
         }
     }
 
+    fn require_admin(env: Env, caller: Address) -> Result<(), SettlementError> {
+        let admin = Self::get_admin(env);
+        if caller != admin {
+            return Err(SettlementError::Unauthorized);
+        }
+        Ok(())
+    }
+
+    fn require_claim_window_open(env: &Env, developer: &Address) -> Result<(), SettlementError> {
+        let window: Option<DeveloperClaimWindow> = env
+            .storage()
+            .persistent()
+            .get(&StorageKey::DeveloperClaimWindow(developer.clone()));
+        if let Some(window) = window {
+            let now = env.ledger().timestamp();
+            if now < window.start_ts || now > window.end_ts {
+                return Err(SettlementError::ClaimWindowClosed);
+            }
+        }
+        Ok(())
+    }
+
     /// Admin-gated contract upgrade.
     ///
     /// Only the current admin may call. This will instruct the host to update
@@ -1181,7 +1354,8 @@ pub fn withdraw_developer_balance(
         }
 
         // Perform the on-chain upgrade via the deployer interface.
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
 
         // Persist the version marker for on-chain queries.
         env.storage()
@@ -1197,9 +1371,7 @@ pub fn withdraw_developer_balance(
     ///
     /// Returns `None` if no upgrade has been performed yet (initial deployment).
     pub fn get_version(env: Env) -> Option<BytesN<32>> {
-        env.storage()
-            .instance()
-            .get(&StorageKey::ContractVersion)
+        env.storage().instance().get(&StorageKey::ContractVersion)
     }
 
     /// Insert `addr` into `index` in sorted order (ascending by raw bytes).

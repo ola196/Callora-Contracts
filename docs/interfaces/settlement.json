@@ -20,7 +20,11 @@
       { "code": 10, "name": "InsufficientDeveloperBalance", "when": "Developer balance is less than withdrawal amount." },
       { "code": 11, "name": "DeveloperBalanceUnderflow",    "when": "Developer balance subtraction would overflow." },
       { "code": 12, "name": "InsufficientContractBalance",  "when": "Settlement contract lacks on-ledger USDC." },
-      { "code": 13, "name": "GasExhaustionRisk",            "when": "Index exceeds 100 entries; use get_developer_balances_cursor instead of get_all_developer_balances." }
+      { "code": 13, "name": "DailyWithdrawCapExceeded",     "when": "Developer's daily withdrawal cap would be exceeded." },
+      { "code": 14, "name": "GasExhaustionRisk",            "when": "Index exceeds 100 entries; use get_developer_balances_cursor instead of get_all_developer_balances." },
+      { "code": 15, "name": "ReasonTooLong",                "when": "Reason Symbol exceeds maximum allowed length." },
+      { "code": 16, "name": "InvalidClaimWindow",           "when": "Claim window end timestamp is before the start timestamp." },
+      { "code": 17, "name": "ClaimWindowClosed",            "when": "A developer attempts to claim outside their configured claim window." }
     ]
   },
 
@@ -54,6 +58,22 @@
         "developer":   { "type": "Address", "description": "Developer address that was credited." },
         "amount":      { "type": "i128",    "description": "Amount credited." },
         "new_balance": { "type": "i128",    "description": "Developer's balance after crediting." }
+      }
+    },
+    "DeveloperClaimWindow": {
+      "description": "Inclusive ledger timestamp range during which a developer may claim accrued balance.",
+      "fields": {
+        "start_ts": { "type": "u64", "description": "First ledger timestamp at which claims are allowed." },
+        "end_ts":   { "type": "u64", "description": "Last ledger timestamp at which claims are allowed." }
+      }
+    },
+    "DeveloperClaimWindowChanged": {
+      "description": "Event payload emitted when an admin sets or clears a developer claim window.",
+      "fields": {
+        "developer": { "type": "Address", "description": "Developer whose claim window changed." },
+        "start_ts":  { "type": "u64",     "description": "Configured start timestamp, or 0 when cleared." },
+        "end_ts":    { "type": "u64",     "description": "Configured end timestamp, or 0 when cleared." },
+        "enabled":   { "type": "bool",    "description": "True when a window is set; false when cleared." }
       }
     }
   },
@@ -122,6 +142,79 @@
     },
 
     {
+      "name": "withdraw_developer_balance",
+      "description": "Developer-authorized claim of accrued balance. If a claim window is configured for the developer, the current ledger timestamp must be within the inclusive [start_ts, end_ts] range.",
+      "access": "developer",
+      "params": [
+        { "name": "developer", "type": "Address",        "optional": false, "description": "Developer address; must authorize." },
+        { "name": "amount",    "type": "i128",           "optional": false, "description": "Amount to withdraw; must be > 0 and <= tracked developer balance." },
+        { "name": "to",        "type": "Address | null", "optional": true,  "description": "Recipient address. Null defaults to developer." }
+      ],
+      "returns": "Result<void, SettlementError>",
+      "errors": [
+        { "code": 4,  "name": "AmountNotPositive",            "when": "amount <= 0." },
+        { "code": 9,  "name": "UsdcTokenNotConfigured",       "when": "USDC token address is not configured." },
+        { "code": 10, "name": "InsufficientDeveloperBalance", "when": "Developer tracked balance is below amount." },
+        { "code": 11, "name": "DeveloperBalanceUnderflow",    "when": "Balance subtraction would underflow." },
+        { "code": 12, "name": "InsufficientContractBalance",  "when": "Settlement contract lacks on-ledger USDC." },
+        { "code": 13, "name": "DailyWithdrawCapExceeded",     "when": "Withdrawal would exceed the developer's daily cap." },
+        { "code": 17, "name": "ClaimWindowClosed",            "when": "Current ledger timestamp is outside the developer's configured claim window." }
+      ],
+      "events": [
+        { "topics": ["\"developer_withdraw\"", "developer"], "data": "DeveloperWithdrawEvent" }
+      ]
+    },
+
+    {
+      "name": "set_developer_claim_window",
+      "description": "Configure an inclusive claim window for a developer. Developers without a configured window remain claimable at any time.",
+      "access": "admin",
+      "params": [
+        { "name": "caller",    "type": "Address", "optional": false, "description": "Must be the current admin; must authorize." },
+        { "name": "developer", "type": "Address", "optional": false, "description": "Developer whose claim window is being configured." },
+        { "name": "start_ts",  "type": "u64",     "optional": false, "description": "First allowed ledger timestamp." },
+        { "name": "end_ts",    "type": "u64",     "optional": false, "description": "Last allowed ledger timestamp." }
+      ],
+      "returns": "Result<void, SettlementError>",
+      "errors": [
+        { "code": 3,  "name": "Unauthorized",       "when": "Caller is not the current admin." },
+        { "code": 16, "name": "InvalidClaimWindow", "when": "end_ts < start_ts." }
+      ],
+      "events": [
+        { "topics": ["\"claim_window_changed\"", "developer"], "data": "DeveloperClaimWindowChanged { enabled: true }" }
+      ]
+    },
+
+    {
+      "name": "clear_developer_claim_window",
+      "description": "Remove a developer's claim window and restore unrestricted developer claims.",
+      "access": "admin",
+      "params": [
+        { "name": "caller",    "type": "Address", "optional": false, "description": "Must be the current admin; must authorize." },
+        { "name": "developer", "type": "Address", "optional": false, "description": "Developer whose claim window is being cleared." }
+      ],
+      "returns": "Result<void, SettlementError>",
+      "errors": [
+        { "code": 3, "name": "Unauthorized", "when": "Caller is not the current admin." }
+      ],
+      "events": [
+        { "topics": ["\"claim_window_changed\"", "developer"], "data": "DeveloperClaimWindowChanged { enabled: false }" }
+      ]
+    },
+
+    {
+      "name": "get_developer_claim_window",
+      "description": "Return the configured claim window for a developer, or null when claims are unrestricted.",
+      "access": "any",
+      "params": [
+        { "name": "developer", "type": "Address", "optional": false, "description": "Developer address to query." }
+      ],
+      "returns": "DeveloperClaimWindow | null",
+      "errors": [],
+      "events": []
+    },
+
+    {
       "name": "get_all_developer_balances",
       "description": "Return a list of all developer balances. Admin only. Rejects the call with GasExhaustionRisk when the developer index exceeds 100 entries — use get_developer_balances_cursor for larger sets. The index is maintained in deterministic ascending order by address bytes.",
       "access": "admin",
@@ -132,7 +225,7 @@
       "errors": [
         { "code": 1,  "name": "NotInitialized",   "when": "Called before init." },
         { "code": 3,  "name": "Unauthorized",      "when": "Caller is not the admin." },
-        { "code": 13, "name": "GasExhaustionRisk", "when": "Developer index has more than 100 entries." }
+        { "code": 14, "name": "GasExhaustionRisk", "when": "Developer index has more than 100 entries." }
       ],
       "events": []
     },
