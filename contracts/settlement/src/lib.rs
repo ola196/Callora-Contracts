@@ -898,6 +898,117 @@ impl CalloraSettlement {
         (result, next_cursor)
     }
 
+    /// Return the remaining TTL for each storage key category.
+    ///
+    /// # Parameters
+    /// - `developer_addresses` — optional list of developers to check. If empty, the index is used.
+    pub fn get_storage_ttl(env: Env, developer_addresses: Vec<Address>) -> Vec<StorageEntryTtl> {
+        let mut result = Vec::new(&env);
+
+        // 1. Instance Storage
+        let instance_ttl = {
+            #[cfg(any(test, feature = "testutils"))]
+            {
+                env.storage().instance().get_ttl()
+            }
+            #[cfg(not(any(test, feature = "testutils")))]
+            {
+                17_280 * 60
+            }
+        };
+        result.push_back(StorageEntryTtl {
+            category: String::from_str(&env, "Instance"),
+            key_desc: String::from_str(&env, "Instance"),
+            storage_type: String::from_str(&env, "Instance"),
+            ttl: instance_ttl,
+            threshold: 17_280 * 30,
+            bump_amount: 17_280 * 60,
+        });
+
+        // Determine which developer addresses to inspect
+        let devs = if developer_addresses.len() > 0 {
+            developer_addresses
+        } else {
+            env.storage()
+                .instance()
+                .get(&StorageKey::DeveloperIndex)
+                .unwrap_or_else(|| Vec::new(&env))
+        };
+
+        for dev in devs.iter() {
+            // Check DeveloperBalance (Persistent)
+            let bal_key = StorageKey::DeveloperBalance(dev.clone());
+            if env.storage().persistent().has(&bal_key) {
+                let ttl = {
+                    #[cfg(any(test, feature = "testutils"))]
+                    {
+                        env.storage().persistent().get_ttl(&bal_key)
+                    }
+                    #[cfg(not(any(test, feature = "testutils")))]
+                    {
+                        50000
+                    }
+                };
+                result.push_back(StorageEntryTtl {
+                    category: String::from_str(&env, "DeveloperBalance"),
+                    key_desc: String::from_str(&env, "DeveloperBalance"),
+                    storage_type: String::from_str(&env, "Persistent"),
+                    ttl,
+                    threshold: 50000,
+                    bump_amount: 50000,
+                });
+            }
+
+            // Check WithdrawalToday (Persistent)
+            let today_key = StorageKey::WithdrawalToday(dev.clone());
+            if env.storage().persistent().has(&today_key) {
+                let ttl = {
+                    #[cfg(any(test, feature = "testutils"))]
+                    {
+                        env.storage().persistent().get_ttl(&today_key)
+                    }
+                    #[cfg(not(any(test, feature = "testutils")))]
+                    {
+                        50000
+                    }
+                };
+                result.push_back(StorageEntryTtl {
+                    category: String::from_str(&env, "WithdrawalToday"),
+                    key_desc: String::from_str(&env, "WithdrawalToday"),
+                    storage_type: String::from_str(&env, "Persistent"),
+                    ttl,
+                    threshold: 50000,
+                    bump_amount: 50000,
+                });
+            }
+
+            // Check DailyWithdrawCap (Persistent)
+            let cap_key = StorageKey::DailyWithdrawCap(dev.clone());
+            if env.storage().persistent().has(&cap_key) {
+                let ttl = {
+                    #[cfg(any(test, feature = "testutils"))]
+                    {
+                        env.storage().persistent().get_ttl(&cap_key)
+                    }
+                    #[cfg(not(any(test, feature = "testutils")))]
+                    {
+                        50000
+                    }
+                };
+                result.push_back(StorageEntryTtl {
+                    category: String::from_str(&env, "DailyWithdrawCap"),
+                    key_desc: String::from_str(&env, "DailyWithdrawCap"),
+                    storage_type: String::from_str(&env, "Persistent"),
+                    ttl,
+                    threshold: 50000,
+                    bump_amount: 50000,
+                });
+            }
+        }
+
+        result
+    }
+
     /// Return the pending admin address, or `None` if no two-step admin transfer is in progress.
     ///
     /// Integrators can poll this to detect an in-flight admin handover
